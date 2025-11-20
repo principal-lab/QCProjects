@@ -1,0 +1,9 @@
+generate_icons.html
+*.bat
+*.md
+auto_generate_all_icons.html
+generate_all_icons.js
+setup_github_apps.bat
+setup_all_git_repos.bat
+ANDROID_INSTALL_INSTRUCTIONS.md
+ENERGY_APPS_GITHUB_INSTRUCTIONS.md
