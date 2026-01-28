@@ -128,6 +128,7 @@
             background-color: rgba(0, 0, 0, 0.2);
             border-radius: 4px;
             border-left: 4px solid #ffffff;
+            font-size: 18px;
         }
 
         .result-item strong {
@@ -238,7 +239,7 @@
 
             <div class="form-row">
                 <div class="form-group">
-                    <label for="fdpStartTime">FDP Start Time (UTC):</label>
+                    <label for="fdpStartTime">FDP Start Time (Local Time):</label>
                     <input type="datetime-local" id="fdpStartTime">
                 </div>
 
@@ -572,8 +573,17 @@
                 return;
             }
 
-            const fdpStartUTC = new Date(fdpStartInput);
             const timezone = parseFloat(document.getElementById('reportingTimezone').value);
+            // Parse the input as timezone-neutral and treat it as the specified local time
+            // Input format is "YYYY-MM-DDTHH:MM"
+            const [datePart, timePart] = fdpStartInput.split('T');
+            const [year, month, day] = datePart.split('-').map(Number);
+            const [hour, minute] = timePart.split(':').map(Number);
+
+            // Create Date object in UTC that represents the local time values
+            const fdpStartLocal = new Date(Date.UTC(year, month - 1, day, hour, minute));
+            // Calculate actual UTC by subtracting timezone offset
+            const fdpStartUTC = new Date(fdpStartLocal.getTime() - timezone * 60 * 60 * 1000);
             const numSectors = parseInt(document.getElementById('numSectors').value);
             const acclimatization = document.getElementById('acclimatizationStatus').value;
             const crewType = document.getElementById('crewType').value;
@@ -620,7 +630,10 @@
             }
 
             const resultsDiv = document.getElementById('fdpResults');
-            const localTimeStr = localTime.toISOString().slice(0, 16).replace('T', ' ');
+
+            // Format FDP Start Time for display
+            const fdpStartLocalStr = fdpStartInput.replace('T', ' '); // Show exactly what was entered
+            const fdpStartUTCStr = fdpStartUTC.toISOString().slice(0, 16).replace('T', ' ');
 
             let html = `
                 <div class="result-item success">
@@ -629,8 +642,8 @@
                 </div>
                 <div class="result-item">
                     <strong>FDP Start Time:</strong>
-                    UTC: ${fdpStartUTC.toISOString().slice(0, 16).replace('T', ' ')}<br>
-                    Local (UTC+${timezone}): ${localTimeStr}<br>
+                    Local (UTC+${timezone}): ${fdpStartLocalStr}<br>
+                    UTC: ${fdpStartUTCStr}<br>
                     Time Period: ${period} (${getPeriodDescription(period)})
                 </div>
             `;
@@ -647,7 +660,7 @@
 
             // Calculate FDP end time
             const fdpEndUTC = new Date(fdpStartUTC.getTime() + maxFDP * 60 * 60 * 1000);
-            const fdpEndLocal = getLocalTime(fdpEndUTC, timezone);
+            const fdpEndLocal = new Date(fdpStartLocal.getTime() + maxFDP * 60 * 60 * 1000);
             const fdpEndUTCStr = fdpEndUTC.toISOString().slice(0, 16).replace('T', ' ');
             const fdpEndLocalStr = fdpEndLocal.toISOString().slice(0, 16).replace('T', ' ');
 
@@ -659,13 +672,27 @@
                 </div>
             `;
 
+            // Calculate Latest Blocks On (FDP end time - 15 minutes)
+            const latestBlocksOnUTC = new Date(fdpEndUTC.getTime() - 15 * 60 * 1000);
+            const latestBlocksOnLocal = new Date(fdpEndLocal.getTime() - 15 * 60 * 1000);
+            const latestBlocksOnUTCStr = latestBlocksOnUTC.toISOString().slice(0, 16).replace('T', ' ');
+            const latestBlocksOnLocalStr = latestBlocksOnLocal.toISOString().slice(0, 16).replace('T', ' ');
+
+            html += `
+                <div class="result-item amber-highlight">
+                    <strong>Latest Blocks On:</strong>
+                    UTC: ${latestBlocksOnUTCStr}<br>
+                    Local (UTC+${timezone}): ${latestBlocksOnLocalStr}
+                </div>
+            `;
+
             // Check for Captain's Duty Time Extension
             const captainExtension = document.getElementById('captainExtension').value;
             if (captainExtension === 'yes') {
                 const extensionHours = 2.0; // Captain's discretion extension
                 const extendedMaxFDP = maxFDP + extensionHours;
                 const fdpExtendedEndUTC = new Date(fdpStartUTC.getTime() + extendedMaxFDP * 60 * 60 * 1000);
-                const fdpExtendedEndLocal = getLocalTime(fdpExtendedEndUTC, timezone);
+                const fdpExtendedEndLocal = new Date(fdpStartLocal.getTime() + extendedMaxFDP * 60 * 60 * 1000);
                 const fdpExtendedEndUTCStr = fdpExtendedEndUTC.toISOString().slice(0, 16).replace('T', ' ');
                 const fdpExtendedEndLocalStr = fdpExtendedEndLocal.toISOString().slice(0, 16).replace('T', ' ');
 
@@ -678,6 +705,20 @@
                         <strong>Extended FDP Limit Time:</strong>
                         UTC: ${fdpExtendedEndUTCStr}<br>
                         Local (UTC+${timezone}): ${fdpExtendedEndLocalStr}
+                    </div>
+                `;
+
+                // Calculate Latest Blocks On for Extended FDP (FDP extended end time - 15 minutes)
+                const latestBlocksOnExtendedUTC = new Date(fdpExtendedEndUTC.getTime() - 15 * 60 * 1000);
+                const latestBlocksOnExtendedLocal = new Date(fdpExtendedEndLocal.getTime() - 15 * 60 * 1000);
+                const latestBlocksOnExtendedUTCStr = latestBlocksOnExtendedUTC.toISOString().slice(0, 16).replace('T', ' ');
+                const latestBlocksOnExtendedLocalStr = latestBlocksOnExtendedLocal.toISOString().slice(0, 16).replace('T', ' ');
+
+                html += `
+                    <div class="result-item amber-highlight">
+                        <strong>Latest Blocks On (Extended):</strong>
+                        UTC: ${latestBlocksOnExtendedUTCStr}<br>
+                        Local (UTC+${timezone}): ${latestBlocksOnExtendedLocalStr}
                     </div>
                 `;
             }
