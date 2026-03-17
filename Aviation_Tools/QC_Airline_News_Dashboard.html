@@ -873,40 +873,71 @@
     // ── RSS Feed Fetching ────────────────────────────────────────
     let regionCache = {};
 
-    async function fetchSingleFeed(feedUrl, feedLabel) {
-        const proxyUrl = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(feedUrl);
-        try {
-            const resp = await fetch(proxyUrl);
-            if (!resp.ok) throw new Error('HTTP ' + resp.status);
-            const text = await resp.text();
-            const parser = new DOMParser();
-            const xml = parser.parseFromString(text, 'text/xml');
-            const items = xml.querySelectorAll('item');
-            const results = [];
-            items.forEach(item => {
-                const title = (item.querySelector('title') || {}).textContent || '';
-                const link = (item.querySelector('link') || {}).textContent || '';
-                const pubDate = (item.querySelector('pubDate') || {}).textContent || '';
-                const source = (item.querySelector('source') || {}).textContent || feedLabel;
-                results.push({
-                    title, link, pubDate,
-                    date: pubDate ? new Date(pubDate) : new Date(0),
-                    source, feedLabel
-                });
+    // CORS proxies — fallback chain if one is unavailable or rate-limited
+    const CORS_PROXIES = [
+        url => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(url),
+        url => 'https://corsproxy.io/?' + encodeURIComponent(url),
+        url => 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(url)
+    ];
+
+    function parseFeedXml(text, feedLabel) {
+        const parser = new DOMParser();
+        const xml = parser.parseFromString(text, 'text/xml');
+        const items = xml.querySelectorAll('item');
+        const results = [];
+        items.forEach(item => {
+            const title = (item.querySelector('title') || {}).textContent || '';
+            const link = (item.querySelector('link') || {}).textContent || '';
+            const pubDate = (item.querySelector('pubDate') || {}).textContent || '';
+            const source = (item.querySelector('source') || {}).textContent || feedLabel;
+            results.push({
+                title, link, pubDate,
+                date: pubDate ? new Date(pubDate) : new Date(0),
+                source, feedLabel
             });
-            return results;
-        } catch (err) {
-            console.warn('Feed fetch failed for ' + feedLabel + ':', err);
-            return [];
-        }
+        });
+        return results;
     }
+
+    async function fetchSingleFeed(feedUrl, feedLabel) {
+        // Try each proxy in order; retry once with a short delay on the first proxy
+        for (let p = 0; p < CORS_PROXIES.length; p++) {
+            const proxyUrl = CORS_PROXIES[p](feedUrl);
+            const maxAttempts = (p === 0) ? 2 : 1; // Retry first proxy once
+            for (let attempt = 0; attempt < maxAttempts; attempt++) {
+                try {
+                    if (attempt > 0) await new Promise(r => setTimeout(r, 1500));
+                    const resp = await fetch(proxyUrl, { signal: AbortSignal.timeout(15000) });
+                    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                    const text = await resp.text();
+                    // Verify we got XML, not an error page
+                    if (!text.includes('<item>') && !text.includes('<item ')) {
+                        throw new Error('Response is not valid RSS');
+                    }
+                    return parseFeedXml(text, feedLabel);
+                } catch (err) {
+                    console.warn('Feed fetch attempt ' + (attempt + 1) + ' via proxy ' + (p + 1) + ' failed for ' + feedLabel + ':', err.message);
+                }
+            }
+        }
+        console.warn('All proxies exhausted for ' + feedLabel);
+        return [];
+    }
+
+    // Stagger requests to avoid rate-limiting
+    function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
 
     async function fetchRegionFeeds(regionKey) {
         const region = REGION_FEEDS[regionKey];
-        const promises = region.feeds.map(f => fetchSingleFeed(f.url, f.label));
-        const results = await Promise.all(promises);
-        const items = results.flat().map(item => ({ ...item, region: regionKey }));
-        const deduped = deduplicateItems(items);
+        // Fetch feeds sequentially with a small delay to avoid proxy rate limits
+        const allItems = [];
+        for (let i = 0; i < region.feeds.length; i++) {
+            if (i > 0) await delay(300);
+            const items = await fetchSingleFeed(region.feeds[i].url, region.feeds[i].label);
+            allItems.push(...items);
+        }
+        const withRegion = allItems.map(item => ({ ...item, region: regionKey }));
+        const deduped = deduplicateItems(withRegion);
         deduped.sort((a, b) => b.date - a.date);
         return deduped.slice(0, 100);
     }
@@ -927,13 +958,16 @@
         const region = REGION_FEEDS[regionKey];
         feedList.innerHTML = '<div class="feed-loading">Fetching news for ' + region.label + '...</div>';
         try {
-            if (!regionCache[regionKey]) {
+            if (!regionCache[regionKey] || regionCache[regionKey].length === 0) {
                 regionCache[regionKey] = await fetchRegionFeeds(regionKey);
             }
             allNewsItems = regionCache[regionKey];
             renderFeedItems();
             updateLastRefreshed();
             updateRegionCount(regionKey);
+            if (allNewsItems.length === 0) {
+                feedList.innerHTML = '<div class="feed-empty">No recent news items found for ' + region.label + '. Try refreshing or adjusting category filters.</div>';
+            }
         } catch (err) {
             feedList.innerHTML = '<div class="feed-empty">Unable to load news for ' + region.label + '. Check your internet connection and try Refresh.</div>';
         }
@@ -944,17 +978,22 @@
         feedList.innerHTML = '<div class="feed-loading">Fetching news for all regions...</div>';
         try {
             const regionKeys = Object.keys(REGION_FEEDS);
-            const promises = regionKeys.map(async key => {
-                if (!regionCache[key]) {
+            // Fetch regions sequentially to avoid overwhelming the proxy
+            for (const key of regionKeys) {
+                if (!regionCache[key] || regionCache[key].length === 0) {
+                    feedList.innerHTML = '<div class="feed-loading">Fetching news for ' + REGION_FEEDS[key].label + '...</div>';
                     regionCache[key] = await fetchRegionFeeds(key);
+                    updateRegionCount(key);
+                    await delay(500);
                 }
-                return regionCache[key];
-            });
-            const results = await Promise.all(promises);
-            allNewsItems = deduplicateItems(results.flat());
+            }
+            allNewsItems = deduplicateItems(Object.values(regionCache).flat());
             allNewsItems.sort((a, b) => b.date - a.date);
             renderFeedItems();
             updateLastRefreshed();
+            if (allNewsItems.length === 0) {
+                feedList.innerHTML = '<div class="feed-empty">No news items could be loaded. Check your internet connection and try Refresh.</div>';
+            }
         } catch (err) {
             feedList.innerHTML = '<div class="feed-empty">Unable to load news. Check your internet connection and try Refresh.</div>';
         }
