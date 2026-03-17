@@ -142,25 +142,25 @@
         .main-content {
             flex: 1;
             display: flex;
-            flex-direction: column;
+            flex-direction: row;
             overflow: hidden;
         }
         #mapPanel {
-            height: 40vh;
-            min-height: 250px;
+            width: 33.333%;
+            min-width: 300px;
             position: relative;
-            border-bottom: 1px solid rgba(212, 168, 67, 0.2);
+            border-right: 1px solid rgba(212, 168, 67, 0.2);
         }
         #mapPanel .leaflet-container { height: 100%; width: 100%; }
         #feedPanel {
             flex: 1;
-            min-height: 300px;
             display: flex;
             flex-direction: column;
             overflow: hidden;
         }
-        @media (max-height: 900px) {
-            #mapPanel { height: 30vh; }
+        @media (max-width: 900px) {
+            .main-content { flex-direction: column; }
+            #mapPanel { width: 100%; height: 35vh; min-width: unset; border-right: none; border-bottom: 1px solid rgba(212, 168, 67, 0.2); }
         }
 
         /* ── All Regions Button ───────────────────────────────── */
@@ -796,8 +796,8 @@
 
     // ── Initialise Leaflet Map ───────────────────────────────────
     const map = L.map('map', {
-        center: [25, 65],
-        zoom: 3,
+        center: [20, 80],
+        zoom: 2,
         zoomControl: true,
         attributionControl: false
     });
@@ -806,6 +806,9 @@
         maxZoom: 18,
         subdomains: 'abcd'
     }).addTo(map);
+
+    // Recalculate map size after layout settles
+    setTimeout(function() { map.invalidateSize(); }, 200);
 
     // ── Draw Region Polygons ─────────────────────────────────────
     Object.entries(REGION_FEEDS).forEach(([key, region]) => {
