@@ -1,0 +1,701 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QC Aviation | Airline Regional News Intelligence Dashboard</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        /* ── CSS Reset & Body ─────────────────────────────────── */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: Arial, sans-serif;
+            background: #0a0e1a;
+            color: #e0e0e0;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* ── Header ───────────────────────────────────────────── */
+        .header {
+            position: sticky;
+            top: 0;
+            background: linear-gradient(135deg, #0d1b2a 0%, #1b2a4a 100%);
+            border-bottom: 2px solid #d4a843;
+            padding: 10px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            z-index: 1000;
+        }
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+        .header-logo {
+            height: 72px;
+            width: auto;
+        }
+        .header h1 {
+            font-size: 18px;
+            font-weight: 700;
+            color: #d4a843;
+            letter-spacing: 0.5px;
+        }
+        .header h1 span {
+            color: #8fadc8;
+            font-weight: 400;
+        }
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .update-btn {
+            background: linear-gradient(135deg, #d4a843 0%, #b8912e 100%);
+            color: #0a0e1a;
+            border: none;
+            padding: 6px 18px;
+            border-radius: 6px;
+            font-family: Arial, sans-serif;
+            font-size: 12px;
+            font-weight: 700;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s;
+        }
+        .update-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(212, 168, 67, 0.3);
+        }
+        .update-btn svg {
+            width: 14px;
+            height: 14px;
+        }
+        .cross-launch-btn {
+            background: rgba(255, 255, 255, 0.08);
+            color: #8fadc8;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            padding: 6px 18px;
+            border-radius: 6px;
+            font-family: Arial, sans-serif;
+            font-size: 12px;
+            font-weight: 700;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s;
+        }
+        .cross-launch-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(255, 255, 255, 0.1);
+        }
+        .bookmark-toggle-btn {
+            background: rgba(255, 255, 255, 0.08);
+            color: #d4a843;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            padding: 6px 18px;
+            border-radius: 6px;
+            font-family: Arial, sans-serif;
+            font-size: 12px;
+            font-weight: 700;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s;
+        }
+        .bookmark-toggle-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(255, 255, 255, 0.1);
+        }
+        .auto-refresh-select {
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 5px;
+            color: #e0e0e0;
+            padding: 6px 10px;
+            font-size: 11px;
+            font-family: Arial, sans-serif;
+        }
+        .last-updated {
+            font-size: 11px;
+            color: #8fadc8;
+        }
+
+        /* ── Two-Panel Layout ─────────────────────────────────── */
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        #mapPanel {
+            height: 40vh;
+            min-height: 250px;
+            position: relative;
+            border-bottom: 1px solid rgba(212, 168, 67, 0.2);
+        }
+        #mapPanel .leaflet-container { height: 100%; width: 100%; }
+        #feedPanel {
+            flex: 1;
+            min-height: 300px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        @media (max-height: 900px) {
+            #mapPanel { height: 30vh; }
+        }
+
+        /* ── All Regions Button ───────────────────────────────── */
+        .all-regions-btn {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 999;
+            background: rgba(13, 27, 42, 0.9);
+            border: 1px solid #d4a843;
+            color: #d4a843;
+            padding: 6px 14px;
+            border-radius: 5px;
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+            font-family: Arial, sans-serif;
+        }
+        .all-regions-btn:hover { background: rgba(212, 168, 67, 0.2); }
+
+        /* ── Feed Toolbar ─────────────────────────────────────── */
+        .feed-toolbar {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 8px 16px;
+            border-bottom: 1px solid rgba(212, 168, 67, 0.15);
+            background: #0d1117;
+            flex-wrap: wrap;
+        }
+        .region-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            color: #e0e0e0;
+        }
+        .region-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #d4a843;
+        }
+        .category-filters {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+        }
+        .category-btn {
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-family: Arial, sans-serif;
+            cursor: pointer;
+            border: 1px solid transparent;
+            transition: all 0.2s;
+            background: rgba(255, 255, 255, 0.06);
+            color: #8fadc8;
+        }
+        .category-btn.active {
+            border-color: var(--cat-color);
+            color: var(--cat-color);
+            background: color-mix(in srgb, var(--cat-color) 12%, transparent);
+        }
+        .feed-count {
+            font-size: 11px;
+            color: #6b7b8d;
+            margin-left: auto;
+        }
+
+        /* ── Feed List & Items ────────────────────────────────── */
+        .feed-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 0;
+        }
+        .feed-item {
+            display: grid;
+            grid-template-columns: 90px 1fr auto auto auto;
+            gap: 12px;
+            align-items: center;
+            padding: 10px 16px;
+            border-left: 3px solid transparent;
+            transition: all 0.15s;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+        }
+        .feed-item:hover {
+            background: rgba(212, 168, 67, 0.04);
+            border-left-color: #d4a843;
+        }
+        .feed-date {
+            font-size: 11px;
+            color: #6b7b8d;
+            font-family: monospace;
+        }
+        .feed-body {
+            min-width: 0;
+        }
+        .feed-title {
+            font-size: 13px;
+            color: #e0e0e0;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .feed-title a {
+            color: #e0e0e0;
+            text-decoration: none;
+        }
+        .feed-title a:hover {
+            color: #d4a843;
+        }
+        .feed-source {
+            font-size: 10px;
+            color: #6b7b8d;
+            margin-top: 2px;
+        }
+        .region-badge {
+            font-size: 10px;
+            padding: 2px 8px;
+            border-radius: 10px;
+            white-space: nowrap;
+        }
+        .feed-badges {
+            display: flex;
+            gap: 4px;
+        }
+        .feed-badges .badge {
+            font-size: 9px;
+            padding: 2px 6px;
+            border-radius: 8px;
+        }
+        .feed-star {
+            cursor: pointer;
+            font-size: 16px;
+            color: #555;
+            transition: color 0.2s;
+            opacity: 0;
+        }
+        .feed-item:hover .feed-star {
+            opacity: 1;
+        }
+        .feed-star:hover,
+        .feed-star.bookmarked {
+            color: #d4a843;
+            opacity: 1;
+        }
+        .feed-empty,
+        .feed-loading {
+            padding: 40px;
+            text-align: center;
+            color: #6b7b8d;
+            font-size: 13px;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- ── Header ─────────────────────────────────────────────── -->
+    <div class="header">
+        <div class="header-left">
+            <img class="header-logo" src="../Branding_Assets/QC_Logo_Small_241206.png" alt="QC Aviation">
+            <h1>Airline Regional News Intelligence <span>| Dashboard</span></h1>
+        </div>
+        <div class="header-right">
+            <span class="last-updated" id="lastUpdated"></span>
+            <select class="auto-refresh-select" id="autoRefreshSelect">
+                <option value="0">Auto-refresh: Off</option>
+                <option value="300000">Auto-refresh: 5 min</option>
+                <option value="900000">Auto-refresh: 15 min</option>
+                <option value="1800000">Auto-refresh: 30 min</option>
+            </select>
+            <button class="update-btn" id="refreshBtn" onclick="refreshFeeds()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="23 4 23 10 17 10"></polyline>
+                    <polyline points="1 20 1 14 7 14"></polyline>
+                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                </svg>
+                Refresh
+            </button>
+            <button class="bookmark-toggle-btn" id="bookmarkToggle" onclick="toggleCurationSidebar()">&#9733; Saved</button>
+            <button class="cross-launch-btn" onclick="window.open('QC_Aircraft_Market_Dashboard.html','_blank')">Market Dashboard &#8599;</button>
+        </div>
+    </div>
+
+    <!-- ── Two-Panel Body ─────────────────────────────────────── -->
+    <div class="main-content">
+        <div id="mapPanel">
+            <div id="map"></div>
+            <button class="all-regions-btn" id="allRegionsBtn" onclick="selectAllRegions()">All Regions</button>
+        </div>
+        <div id="feedPanel">
+            <div class="feed-toolbar" id="feedToolbar">
+                <div class="region-indicator" id="regionIndicator">
+                    <span class="region-dot" id="regionDot"></span>
+                    <span id="regionName">All Regions</span>
+                </div>
+                <div class="category-filters" id="categoryFilters"></div>
+                <span class="feed-count" id="feedCount"></span>
+            </div>
+            <div class="feed-list" id="feedList">
+                <div class="feed-empty">Select a region on the map to load news, or click "All Regions".</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── JavaScript ─────────────────────────────────────────── -->
+    <script>
+    /* ================================================================
+       QC Airline Regional News Intelligence Dashboard
+       Tasks 1–3: Shell, Map, Feed Toolbar & Rendering
+       ================================================================ */
+
+    // ── Region Configuration ─────────────────────────────────────
+    const REGION_FEEDS = {
+        australia: {
+            key: 'australia',
+            label: 'Australia',
+            color: '#4da6ff',
+            coords: [
+                [-10.5, 113.0], [-10.5, 154.0], [-28.0, 154.0],
+                [-39.5, 149.0], [-44.0, 147.5], [-44.0, 114.0],
+                [-35.0, 114.0], [-22.0, 113.0]
+            ],
+            feeds: []
+        },
+        oceania: {
+            key: 'oceania',
+            label: 'Oceania',
+            color: '#4dd9c0',
+            coords: [
+                [-2.0, 155.0], [-2.0, 180.0], [-10.0, 180.0],
+                [-22.0, 180.0], [-48.0, 180.0], [-48.0, 165.0],
+                [-34.0, 165.0], [-10.0, 155.0]
+            ],
+            feeds: []
+        },
+        seasia: {
+            key: 'seasia',
+            label: 'South-East Asia',
+            color: '#d4a843',
+            coords: [
+                [23.5, 97.0], [23.5, 120.0], [22.5, 120.0],
+                [10.0, 120.0], [1.0, 110.0], [-8.5, 115.0],
+                [-11.0, 105.0], [-6.0, 95.0], [5.0, 95.0],
+                [10.0, 97.0]
+            ],
+            feeds: []
+        },
+        eastasia: {
+            key: 'eastasia',
+            label: 'East Asia',
+            color: '#e91e63',
+            coords: [
+                [53.5, 73.0], [53.5, 135.0], [46.0, 145.0],
+                [30.0, 132.0], [24.0, 122.0], [18.0, 108.0],
+                [22.0, 100.0], [28.0, 87.0], [36.0, 73.0],
+                [42.0, 73.0]
+            ],
+            feeds: []
+        },
+        centralasia: {
+            key: 'centralasia',
+            label: 'Central Asia',
+            color: '#00bcd4',
+            coords: [
+                [55.0, 50.0], [55.0, 73.0], [42.0, 73.0],
+                [36.0, 73.0], [35.0, 60.0], [37.0, 50.0],
+                [40.0, 47.0], [45.0, 50.0]
+            ],
+            feeds: []
+        },
+        middleeast: {
+            key: 'middleeast',
+            label: 'Middle East',
+            color: '#ff9800',
+            coords: [
+                [42.0, 26.0], [42.0, 60.0], [35.0, 60.0],
+                [25.0, 56.0], [12.5, 43.0], [12.5, 36.0],
+                [30.0, 32.0], [32.0, 26.0], [37.0, 26.0]
+            ],
+            feeds: []
+        },
+        europe: {
+            key: 'europe',
+            label: 'Europe',
+            color: '#9c27b0',
+            coords: [
+                [71.0, -25.0], [71.0, 45.0], [55.0, 50.0],
+                [45.0, 50.0], [42.0, 45.0], [42.0, 26.0],
+                [35.0, 26.0], [35.0, -10.0], [43.0, -10.0],
+                [48.0, -6.0], [58.0, -12.0], [64.0, -25.0]
+            ],
+            feeds: []
+        }
+    };
+
+    // ── Category Configuration ───────────────────────────────────
+    const CATEGORIES = {
+        operations:  { label: 'Operations',   color: '#4da6ff', keywords: ['operations','fleet','maintenance','crew','pilot','schedule','capacity','codeshare'] },
+        orders:      { label: 'Orders',       color: '#4caf50', keywords: ['order','firm order','purchase','commit','agreement','loi','mou','backlog','delivery'] },
+        routes:      { label: 'Routes',       color: '#d4a843', keywords: ['route','destination','frequency','hub','network','nonstop','inaugural'] },
+        newairlines: { label: 'New Airlines',  color: '#e91e63', keywords: ['startup','new airline','aoc','first flight','maiden','commence'] },
+        disruptions: { label: 'Disruptions',  color: '#f44336', keywords: ['cancel','delay','suspend','ground','strike','disruption','divert','emergency'] }
+    };
+
+    // ── State ────────────────────────────────────────────────────
+    let selectedRegion = null;
+    let allNewsItems = [];
+    let activeCategories = new Set(Object.keys(CATEGORIES));
+    const regionLayers = {};
+
+    // ── Initialise Leaflet Map ───────────────────────────────────
+    const map = L.map('map', {
+        center: [25, 65],
+        zoom: 3,
+        zoomControl: true,
+        attributionControl: false
+    });
+
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+        maxZoom: 18,
+        subdomains: 'abcd'
+    }).addTo(map);
+
+    // ── Draw Region Polygons ─────────────────────────────────────
+    Object.entries(REGION_FEEDS).forEach(([key, region]) => {
+        const polygon = L.polygon(region.coords, {
+            color: region.color,
+            weight: 2,
+            fillColor: region.color,
+            fillOpacity: 0.2
+        }).addTo(map);
+
+        polygon.bindTooltip(region.label, {
+            sticky: true,
+            className: 'region-tooltip'
+        });
+
+        polygon.on('mouseover', function () {
+            if (selectedRegion !== key) {
+                this.setStyle({ fillOpacity: 0.4 });
+            }
+        });
+        polygon.on('mouseout', function () {
+            if (selectedRegion !== key) {
+                this.setStyle({ fillOpacity: 0.2 });
+            }
+        });
+        polygon.on('click', function () {
+            selectRegion(key);
+        });
+
+        regionLayers[key] = polygon;
+    });
+
+    // ── Region Selection ─────────────────────────────────────────
+    function selectRegion(regionKey) {
+        selectedRegion = regionKey;
+        Object.keys(regionLayers).forEach(k => {
+            regionLayers[k].setStyle({ weight: 2, fillOpacity: 0.2 });
+        });
+        regionLayers[regionKey].setStyle({ weight: 4, fillOpacity: 0.35 });
+        updateRegionIndicator(regionKey);
+        loadRegionNews(regionKey);
+    }
+
+    function selectAllRegions() {
+        selectedRegion = null;
+        Object.keys(regionLayers).forEach(k => {
+            regionLayers[k].setStyle({ weight: 2, fillOpacity: 0.2 });
+        });
+        updateRegionIndicator(null);
+        loadAllRegionsNews();
+    }
+
+    function updateRegionIndicator(regionKey) {
+        const dot = document.getElementById('regionDot');
+        const name = document.getElementById('regionName');
+        if (regionKey && REGION_FEEDS[regionKey]) {
+            dot.style.background = REGION_FEEDS[regionKey].color;
+            name.textContent = REGION_FEEDS[regionKey].label;
+        } else {
+            dot.style.background = '#d4a843';
+            name.textContent = 'All Regions';
+        }
+    }
+
+    // ── Feed Loading Placeholders ────────────────────────────────
+    function loadRegionNews(regionKey) {
+        const feedList = document.getElementById('feedList');
+        const region = REGION_FEEDS[regionKey];
+        feedList.innerHTML = '<div class="feed-loading">Loading news for ' + region.label + '...</div>';
+    }
+
+    function loadAllRegionsNews() {
+        const feedList = document.getElementById('feedList');
+        feedList.innerHTML = '<div class="feed-loading">Loading news for all regions...</div>';
+    }
+
+    // ── Category Detection ───────────────────────────────────────
+    function detectCategories(title) {
+        const results = [];
+        const lower = title.toLowerCase();
+        Object.entries(CATEGORIES).forEach(([key, cat]) => {
+            const matched = cat.keywords.some(kw => {
+                const regex = new RegExp('\\b' + kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'i');
+                return regex.test(lower);
+            });
+            if (matched) results.push(key);
+        });
+        return results;
+    }
+
+    // ── Category Filter Buttons ──────────────────────────────────
+    function buildCategoryFilters() {
+        const container = document.getElementById('categoryFilters');
+        container.innerHTML = Object.entries(CATEGORIES).map(([key, cat]) => {
+            return '<button class="category-btn active" data-cat="' + key + '" ' +
+                   'style="--cat-color:' + cat.color + '" ' +
+                   'onclick="toggleCategory(\'' + key + '\', this)">' +
+                   cat.label + '</button>';
+        }).join('');
+    }
+
+    function toggleCategory(catKey, btn) {
+        if (activeCategories.has(catKey)) {
+            activeCategories.delete(catKey);
+            btn.classList.remove('active');
+        } else {
+            activeCategories.add(catKey);
+            btn.classList.add('active');
+        }
+        renderFeedItems();
+    }
+
+    // ── Date Formatting (DDMMMYYYY) ─────────────────────────────
+    function formatNewsDate(d) {
+        if (!d || isNaN(d.getTime())) return '\u2014';
+        const months = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+        const dd = String(d.getDate()).padStart(2, '0');
+        return dd + months[d.getMonth()] + d.getFullYear();
+    }
+
+    // ── Utilities ────────────────────────────────────────────────
+    function generateItemId(item) {
+        const titleKey = item.title.toLowerCase().replace(/[^a-z0-9]/g, '').substring(0, 60);
+        const dateKey = item.date ? item.date.toISOString().split('T')[0] : '';
+        return titleKey + '|' + dateKey;
+    }
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    // ── Bookmark Placeholders ────────────────────────────────────
+    function isBookmarked(itemId) { return false; }
+
+    function bookmarkFromFeed(el) {
+        const itemId = el.dataset.id;
+        const newsItem = allNewsItems.find(i => generateItemId(i) === itemId);
+        if (newsItem && typeof bookmarkItem === 'function') bookmarkItem(newsItem);
+    }
+
+    function toggleCurationSidebar() {
+        /* Placeholder — implemented in a later task */
+    }
+
+    // ── Render Feed Items ────────────────────────────────────────
+    function renderFeedItems() {
+        const feedList = document.getElementById('feedList');
+        const countEl = document.getElementById('feedCount');
+
+        // Filter by active categories and selected region
+        let filtered = allNewsItems.filter(item => {
+            const cats = detectCategories(item.title);
+            // Uncategorised items always show
+            if (cats.length === 0) return true;
+            return cats.some(c => activeCategories.has(c));
+        });
+
+        if (selectedRegion) {
+            filtered = filtered.filter(item => item.region === selectedRegion);
+        }
+
+        // Sort by date descending
+        filtered.sort((a, b) => b.date - a.date);
+
+        if (filtered.length === 0) {
+            feedList.innerHTML = '<div class="feed-empty">No news items match the current filters.</div>';
+            countEl.textContent = '0 items';
+            return;
+        }
+
+        countEl.textContent = filtered.length + ' item' + (filtered.length !== 1 ? 's' : '');
+
+        feedList.innerHTML = filtered.map(item => {
+            const id = generateItemId(item);
+            const cats = detectCategories(item.title);
+            const region = item.region && REGION_FEEDS[item.region] ? REGION_FEEDS[item.region] : null;
+            const bookmarked = typeof isBookmarked === 'function' && isBookmarked(id);
+            const starChar = bookmarked ? '&#9733;' : '&#9734;';
+            const starClass = bookmarked ? 'feed-star bookmarked' : 'feed-star';
+
+            let badges = cats.map(c => {
+                const cat = CATEGORIES[c];
+                return '<span class="badge" style="background:' + cat.color + '22;color:' + cat.color + '">' + cat.label + '</span>';
+            }).join('');
+
+            let regionBadge = '';
+            if (region) {
+                regionBadge = '<span class="region-badge" style="background:' + region.color + '22;color:' + region.color + '">' + region.label + '</span>';
+            }
+
+            return '<div class="feed-item" data-id="' + id + '" data-region="' + (item.region || '') + '">' +
+                '<div class="feed-date">' + formatNewsDate(item.date) + '</div>' +
+                '<div class="feed-body">' +
+                    '<div class="feed-title"><a href="' + (item.link || '#') + '" target="_blank" rel="noopener">' + escapeHtml(item.title) + '</a></div>' +
+                    '<div class="feed-source">' + escapeHtml(item.source || item.feedLabel || '') + '</div>' +
+                '</div>' +
+                regionBadge +
+                '<div class="feed-badges">' + badges + '</div>' +
+                '<div class="' + starClass + '" onclick="bookmarkFromFeed(this)" data-id="' + id + '">' + starChar + '</div>' +
+            '</div>';
+        }).join('');
+    }
+
+    // ── Refresh Placeholder ──────────────────────────────────────
+    function refreshFeeds() {
+        /* Placeholder — implemented in a later task */
+        if (selectedRegion) {
+            loadRegionNews(selectedRegion);
+        } else {
+            loadAllRegionsNews();
+        }
+    }
+
+    // ── Initialise on DOM Ready ──────────────────────────────────
+    document.addEventListener('DOMContentLoaded', function () {
+        buildCategoryFilters();
+    });
+    </script>
+</body>
+</html>
