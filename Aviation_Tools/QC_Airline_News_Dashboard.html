@@ -254,7 +254,7 @@
         .feed-date {
             font-size: 11px;
             color: #6b7b8d;
-            font-family: monospace;
+            font-family: Arial, sans-serif;
         }
         .feed-body {
             min-width: 0;
@@ -783,7 +783,7 @@
     const CATEGORIES = {
         operations:  { label: 'Operations',   color: '#4da6ff', keywords: ['operations','fleet','maintenance','crew','pilot','schedule','capacity','codeshare'] },
         orders:      { label: 'Orders',       color: '#4caf50', keywords: ['order','firm order','purchase','commit','agreement','loi','mou','backlog','delivery'] },
-        routes:      { label: 'Routes',       color: '#d4a843', keywords: ['route','destination','frequency','hub','network','nonstop','inaugural'] },
+        routes:      { label: 'Route Intelligence', color: '#d4a843', keywords: ['route','destination','frequency','hub','network','nonstop','inaugural'] },
         newairlines: { label: 'New Airlines',  color: '#e91e63', keywords: ['startup','new airline','aoc','first flight','maiden','commence'] },
         disruptions: { label: 'Disruptions',  color: '#f44336', keywords: ['cancel','delay','suspend','ground','strike','disruption','divert','emergency'] }
     };
@@ -1077,6 +1077,20 @@
         renderFeedItems();
     }
 
+    function pushBookmarkToOrders(itemId) {
+        const bookmarks = getBookmarks();
+        const bm = bookmarks.find(b => b.id === itemId);
+        if (!bm) return;
+        // Reconstruct a news-item-like object for showOrderModal
+        showOrderModal({
+            title: bm.title,
+            link: bm.link,
+            source: bm.source,
+            date: bm.date ? new Date(bm.date) : null,
+            region: bm.region
+        });
+    }
+
     function addTagsToBookmark(itemId) {
         const bookmarks = getBookmarks();
         const bm = bookmarks.find(b => b.id === itemId);
@@ -1192,6 +1206,7 @@
                 '<div class="saved-item-actions">' +
                     '<button onclick="addTagsToBookmark(\'' + b.id.replace(/'/g, "\\'") + '\')">Tags</button>' +
                     '<button onclick="addNotesToBookmark(\'' + b.id.replace(/'/g, "\\'") + '\')">Notes</button>' +
+                    ((b.categories && b.categories.includes('orders')) ? '<button onclick="pushBookmarkToOrders(\'' + b.id.replace(/'/g, "\\'") + '\')">Push to Orders</button>' : '') +
                     '<button class="delete-btn" onclick="deleteBookmark(\'' + b.id.replace(/'/g, "\\'") + '\')">Delete</button>' +
                 '</div>' +
             '</div>';
