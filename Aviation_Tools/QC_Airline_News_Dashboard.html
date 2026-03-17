@@ -125,6 +125,14 @@
             font-size: 11px;
             font-family: Arial, sans-serif;
         }
+        .auto-refresh-select.active {
+            border-color: #4caf50;
+            animation: pulse-green 2s ease-in-out infinite;
+        }
+        @keyframes pulse-green {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(76,175,80,0); }
+            50% { box-shadow: 0 0 8px 2px rgba(76,175,80,0.3); }
+        }
         .last-updated {
             font-size: 11px;
             color: #8fadc8;
@@ -377,7 +385,9 @@
                 [-39.5, 149.0], [-44.0, 147.5], [-44.0, 114.0],
                 [-35.0, 114.0], [-22.0, 113.0]
             ],
-            feeds: []
+            feeds: [
+                { label: 'Google News — Australia', url: 'https://news.google.com/rss/search?q=airline%20Australia%20Qantas%20OR%20Jetstar%20OR%20Virgin%20OR%20Rex%20OR%20Bonza&hl=en&gl=US&ceid=US:en' }
+            ]
         },
         oceania: {
             key: 'oceania',
@@ -388,7 +398,9 @@
                 [-22.0, 180.0], [-48.0, 180.0], [-48.0, 165.0],
                 [-34.0, 165.0], [-10.0, 155.0]
             ],
-            feeds: []
+            feeds: [
+                { label: 'Google News — Oceania', url: 'https://news.google.com/rss/search?q=airline%20Pacific%20Fiji%20OR%20%22Air%20New%20Zealand%22%20OR%20%22Solomon%20Airlines%22&hl=en&gl=US&ceid=US:en' }
+            ]
         },
         seasia: {
             key: 'seasia',
@@ -400,7 +412,9 @@
                 [-11.0, 105.0], [-6.0, 95.0], [5.0, 95.0],
                 [10.0, 97.0]
             ],
-            feeds: []
+            feeds: [
+                { label: 'Google News — South-East Asia', url: 'https://news.google.com/rss/search?q=airline%20%22Southeast%20Asia%22%20OR%20Singapore%20OR%20%22Hong%20Kong%22%20OR%20Cathay%20OR%20AirAsia%20OR%20Scoot&hl=en&gl=US&ceid=US:en' }
+            ]
         },
         eastasia: {
             key: 'eastasia',
@@ -412,7 +426,9 @@
                 [22.0, 100.0], [28.0, 87.0], [36.0, 73.0],
                 [42.0, 73.0]
             ],
-            feeds: []
+            feeds: [
+                { label: 'Google News — East Asia', url: 'https://news.google.com/rss/search?q=airline%20China%20OR%20Japan%20OR%20%22South%20Korea%22%20OR%20Taiwan%20OR%20ANA%20OR%20JAL%20OR%20%22Air%20China%22%20OR%20%22Korean%20Air%22%20OR%20COMAC&hl=en&gl=US&ceid=US:en' }
+            ]
         },
         centralasia: {
             key: 'centralasia',
@@ -423,7 +439,9 @@
                 [36.0, 73.0], [35.0, 60.0], [37.0, 50.0],
                 [40.0, 47.0], [45.0, 50.0]
             ],
-            feeds: []
+            feeds: [
+                { label: 'Google News — Central Asia', url: 'https://news.google.com/rss/search?q=airline%20Kazakhstan%20OR%20Uzbekistan%20OR%20%22Air%20Astana%22%20OR%20%22Uzbekistan%20Airways%22%20OR%20%22FlyArystan%22&hl=en&gl=US&ceid=US:en' }
+            ]
         },
         middleeast: {
             key: 'middleeast',
@@ -434,7 +452,9 @@
                 [25.0, 56.0], [12.5, 43.0], [12.5, 36.0],
                 [30.0, 32.0], [32.0, 26.0], [37.0, 26.0]
             ],
-            feeds: []
+            feeds: [
+                { label: 'Google News — Middle East', url: 'https://news.google.com/rss/search?q=airline%20%22Middle%20East%22%20OR%20Emirates%20OR%20Qatar%20OR%20Etihad%20OR%20Saudia%20OR%20flynas&hl=en&gl=US&ceid=US:en' }
+            ]
         },
         europe: {
             key: 'europe',
@@ -446,7 +466,9 @@
                 [35.0, 26.0], [35.0, -10.0], [43.0, -10.0],
                 [48.0, -6.0], [58.0, -12.0], [64.0, -25.0]
             ],
-            feeds: []
+            feeds: [
+                { label: 'Google News — Europe', url: 'https://news.google.com/rss/search?q=airline%20Europe%20Ryanair%20OR%20easyJet%20OR%20Lufthansa%20OR%20%22British%20Airways%22%20OR%20Wizz&hl=en&gl=US&ceid=US:en' }
+            ]
         }
     };
 
@@ -541,16 +563,94 @@
         }
     }
 
-    // ── Feed Loading Placeholders ────────────────────────────────
-    function loadRegionNews(regionKey) {
-        const feedList = document.getElementById('feedList');
-        const region = REGION_FEEDS[regionKey];
-        feedList.innerHTML = '<div class="feed-loading">Loading news for ' + region.label + '...</div>';
+    // ── RSS Feed Fetching ────────────────────────────────────────
+    let regionCache = {};
+
+    async function fetchSingleFeed(feedUrl, feedLabel) {
+        const proxyUrl = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(feedUrl);
+        try {
+            const resp = await fetch(proxyUrl);
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            const text = await resp.text();
+            const parser = new DOMParser();
+            const xml = parser.parseFromString(text, 'text/xml');
+            const items = xml.querySelectorAll('item');
+            const results = [];
+            items.forEach(item => {
+                const title = (item.querySelector('title') || {}).textContent || '';
+                const link = (item.querySelector('link') || {}).textContent || '';
+                const pubDate = (item.querySelector('pubDate') || {}).textContent || '';
+                const source = (item.querySelector('source') || {}).textContent || feedLabel;
+                results.push({
+                    title, link, pubDate,
+                    date: pubDate ? new Date(pubDate) : new Date(0),
+                    source, feedLabel
+                });
+            });
+            return results;
+        } catch (err) {
+            console.warn('Feed fetch failed for ' + feedLabel + ':', err);
+            return [];
+        }
     }
 
-    function loadAllRegionsNews() {
+    async function fetchRegionFeeds(regionKey) {
+        const region = REGION_FEEDS[regionKey];
+        const promises = region.feeds.map(f => fetchSingleFeed(f.url, f.label));
+        const results = await Promise.all(promises);
+        const items = results.flat().map(item => ({ ...item, region: regionKey }));
+        const deduped = deduplicateItems(items);
+        deduped.sort((a, b) => b.date - a.date);
+        return deduped.slice(0, 100);
+    }
+
+    function deduplicateItems(items) {
+        const seen = new Set();
+        return items.filter(item => {
+            const key = item.title.toLowerCase().replace(/[^a-z0-9]/g, '').substring(0, 60);
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
+    }
+
+    // ── Feed Loading ──────────────────────────────────────────────
+    async function loadRegionNews(regionKey) {
         const feedList = document.getElementById('feedList');
-        feedList.innerHTML = '<div class="feed-loading">Loading news for all regions...</div>';
+        const region = REGION_FEEDS[regionKey];
+        feedList.innerHTML = '<div class="feed-loading">Fetching news for ' + region.label + '...</div>';
+        try {
+            if (!regionCache[regionKey]) {
+                regionCache[regionKey] = await fetchRegionFeeds(regionKey);
+            }
+            allNewsItems = regionCache[regionKey];
+            renderFeedItems();
+            updateLastRefreshed();
+            updateRegionCount(regionKey);
+        } catch (err) {
+            feedList.innerHTML = '<div class="feed-empty">Unable to load news for ' + region.label + '. Check your internet connection and try Refresh.</div>';
+        }
+    }
+
+    async function loadAllRegionsNews() {
+        const feedList = document.getElementById('feedList');
+        feedList.innerHTML = '<div class="feed-loading">Fetching news for all regions...</div>';
+        try {
+            const regionKeys = Object.keys(REGION_FEEDS);
+            const promises = regionKeys.map(async key => {
+                if (!regionCache[key]) {
+                    regionCache[key] = await fetchRegionFeeds(key);
+                }
+                return regionCache[key];
+            });
+            const results = await Promise.all(promises);
+            allNewsItems = deduplicateItems(results.flat());
+            allNewsItems.sort((a, b) => b.date - a.date);
+            renderFeedItems();
+            updateLastRefreshed();
+        } catch (err) {
+            feedList.innerHTML = '<div class="feed-empty">Unable to load news. Check your internet connection and try Refresh.</div>';
+        }
     }
 
     // ── Category Detection ───────────────────────────────────────
@@ -682,19 +782,63 @@
         }).join('');
     }
 
-    // ── Refresh Placeholder ──────────────────────────────────────
+    // ── Refresh & Last Updated ──────────────────────────────────
     function refreshFeeds() {
-        /* Placeholder — implemented in a later task */
         if (selectedRegion) {
+            delete regionCache[selectedRegion];
             loadRegionNews(selectedRegion);
         } else {
+            regionCache = {};
             loadAllRegionsNews();
+        }
+    }
+
+    function updateLastRefreshed() {
+        const el = document.getElementById('lastUpdated');
+        const now = new Date();
+        el.textContent = 'Last refreshed: ' + String(now.getHours()).padStart(2,'0') + ':' + String(now.getMinutes()).padStart(2,'0');
+    }
+
+    function updateRegionCount(regionKey) {
+        const count = (regionCache[regionKey] || []).length;
+        if (regionLayers[regionKey]) {
+            regionLayers[regionKey].unbindTooltip();
+            regionLayers[regionKey].bindTooltip(REGION_FEEDS[regionKey].label + ' (' + count + ')', { sticky: true });
+        }
+    }
+
+    // ── Auto-Refresh ──────────────────────────────────────────────
+    let autoRefreshTimer = null;
+
+    function setupAutoRefresh() {
+        const select = document.getElementById('autoRefreshSelect');
+        const saved = localStorage.getItem('qc_news_autorefresh') || '0';
+        select.value = saved;
+
+        select.addEventListener('change', function() {
+            localStorage.setItem('qc_news_autorefresh', this.value);
+            clearInterval(autoRefreshTimer);
+            autoRefreshTimer = null;
+            const interval = parseInt(this.value);
+            if (interval > 0) {
+                autoRefreshTimer = setInterval(() => refreshFeeds(), interval);
+                this.classList.add('active');
+            } else {
+                this.classList.remove('active');
+            }
+        });
+
+        const interval = parseInt(saved);
+        if (interval > 0) {
+            autoRefreshTimer = setInterval(() => refreshFeeds(), interval);
+            select.classList.add('active');
         }
     }
 
     // ── Initialise on DOM Ready ──────────────────────────────────
     document.addEventListener('DOMContentLoaded', function () {
         buildCategoryFilters();
+        setupAutoRefresh();
     });
     </script>
 </body>
