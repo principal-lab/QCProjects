@@ -498,6 +498,101 @@
             font-family: Arial, sans-serif;
         }
         .sidebar-actions button:hover { background: rgba(255,255,255,0.12); }
+
+        /* ── Order Modal ─────────────────────────────────────────── */
+        .order-modal-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 10001;
+            background: rgba(0,0,0,0.6);
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }
+        .order-modal-overlay.active { display: flex; }
+        .order-modal {
+            background: #1a2636;
+            border: 1px solid rgba(212,168,67,0.3);
+            border-radius: 10px;
+            padding: 28px 32px;
+            width: 520px;
+            max-width: 95vw;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: 0 16px 48px rgba(0,0,0,0.5);
+        }
+        .order-modal h3 {
+            margin: 0 0 6px 0;
+            font-size: 16px;
+            color: #d4a843;
+            font-weight: 700;
+        }
+        .order-modal .modal-subtitle {
+            font-size: 11px;
+            color: #6b7b8d;
+            margin-bottom: 18px;
+            line-height: 1.5;
+        }
+        .order-modal .form-row {
+            display: grid;
+            grid-template-columns: 120px 1fr;
+            gap: 8px;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .order-modal label {
+            font-size: 11px;
+            color: #8fadc8;
+            text-align: right;
+            padding-right: 6px;
+        }
+        .order-modal input, .order-modal select, .order-modal textarea {
+            background: rgba(255,255,255,0.06);
+            border: 1px solid rgba(255,255,255,0.12);
+            border-radius: 5px;
+            color: #e0e0e0;
+            padding: 7px 10px;
+            font-size: 12px;
+            font-family: inherit;
+        }
+        .order-modal input:focus, .order-modal select:focus, .order-modal textarea:focus {
+            outline: none;
+            border-color: #d4a843;
+        }
+        .order-modal textarea { resize: vertical; min-height: 50px; }
+        .order-modal .modal-actions {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+            margin-top: 18px;
+        }
+        .order-modal .btn-modal {
+            padding: 8px 20px;
+            border: none;
+            border-radius: 5px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .order-modal .btn-add {
+            background: #d4a843;
+            color: #0d1b2a;
+        }
+        .order-modal .btn-add:hover { background: #e0ba5a; }
+        .order-modal .btn-cancel {
+            background: rgba(255,255,255,0.08);
+            color: #8fadc8;
+        }
+        .order-modal .btn-cancel:hover { background: rgba(255,255,255,0.14); }
+        .order-modal .parsed-headline {
+            font-size: 11px;
+            color: #6b7b8d;
+            background: rgba(255,255,255,0.03);
+            padding: 8px 10px;
+            border-radius: 5px;
+            margin-bottom: 14px;
+            line-height: 1.5;
+        }
     </style>
 </head>
 <body>
@@ -549,6 +644,8 @@
             </div>
         </div>
     </div>
+
+    <div style="position:fixed;bottom:4px;left:12px;font-size:9px;color:#333;z-index:1;">v1.0 — 17MAR2026</div>
 
     <!-- ── Curation Sidebar ─────────────────────────────────────── -->
     <div class="curation-overlay" id="curationOverlay" onclick="toggleCurationSidebar()"></div>
@@ -1188,9 +1285,167 @@
         return id;
     }
 
-    function showOrderModal(item) {
-        showToast('Push to Orders will be available soon.');
+    // ── Order Modal DOM ──────────────────────────────────────────
+    const orderModalOverlay = document.createElement('div');
+    orderModalOverlay.className = 'order-modal-overlay';
+    orderModalOverlay.innerHTML =
+        '<div class="order-modal">' +
+            '<h3>Push to Market Dashboard Orders</h3>' +
+            '<div class="modal-subtitle">Review and edit the details extracted from the news headline, then push to the Aircraft Market Dashboard order database.</div>' +
+            '<div class="parsed-headline" id="orderModalHeadline"></div>' +
+            '<div class="form-row"><label>Date</label><input type="text" id="orderModalDate" placeholder="e.g. 15MAR2026"></div>' +
+            '<div class="form-row"><label>Airline / Lessor</label><input type="text" id="orderModalAirline" placeholder="e.g. Pegasus Airlines"></div>' +
+            '<div class="form-row"><label>OEM</label><select id="orderModalOem">' +
+                '<option value="">— select —</option>' +
+                '<option value="Airbus">Airbus</option>' +
+                '<option value="Boeing">Boeing</option>' +
+                '<option value="Embraer">Embraer</option>' +
+                '<option value="COMAC">COMAC</option>' +
+                '<option value="ATR">ATR</option>' +
+                '<option value="Other">Other</option>' +
+            '</select></div>' +
+            '<div class="form-row"><label>Aircraft Type</label><input type="text" id="orderModalType" placeholder="e.g. A321neo"></div>' +
+            '<div class="form-row"><label>Quantity</label><input type="number" id="orderModalQty" min="1" placeholder="e.g. 50"></div>' +
+            '<div class="form-row"><label>Status</label><select id="orderModalStatus">' +
+                '<option value="Order">Order</option>' +
+                '<option value="Cancellation">Cancellation</option>' +
+            '</select></div>' +
+            '<div class="form-row"><label>Est. Value (US$B)</label><input type="text" id="orderModalValue" placeholder="e.g. 5.0"></div>' +
+            '<div class="form-row"><label>Notes</label><textarea id="orderModalNotes" placeholder="Source or additional context"></textarea></div>' +
+            '<div class="modal-actions">' +
+                '<button class="btn-modal btn-cancel" id="orderModalCancelBtn">Cancel</button>' +
+                '<button class="btn-modal btn-add" id="orderModalAddBtn">Push Order</button>' +
+            '</div>' +
+        '</div>';
+    document.body.appendChild(orderModalOverlay);
+
+    // ── Parse Headline for Order Data ─────────────────────────────
+    function parseHeadlineForOrder(title) {
+        const result = { oem: '', type: '', qty: '', airline: '' };
+        const t = title;
+
+        const oemMap = {
+            'Airbus': /\bAirbus\b/i,
+            'Boeing': /\bBoeing\b/i,
+            'Embraer': /\bEmbraer\b/i,
+            'COMAC': /\bCOMAC\b/i,
+            'ATR': /\bATR\b/i
+        };
+        for (const [oem, rx] of Object.entries(oemMap)) {
+            if (rx.test(t)) { result.oem = oem; break; }
+        }
+
+        const typePatterns = [
+            /\b(A350F)\b/i, /\b(A350-\d{3,4}\w*)\b/i, /\b(A350)\b/i,
+            /\b(A330-?\d{3}\w*)\b/i, /\b(A330neo)\b/i, /\b(A330)\b/i,
+            /\b(A321XLR)\b/i, /\b(A321neo)\b/i, /\b(A321)\b/i,
+            /\b(A320neo)\b/i, /\b(A320)\b/i, /\b(A220-?\d{3})\b/i, /\b(A220)\b/i,
+            /\b(737\s*MAX\s*\d{1,2})\b/i, /\b(737\s*MAX)\b/i,
+            /\b(777X)\b/i, /\b(777-9)\b/i, /\b(777-8F?)\b/i, /\b(777)\b/i,
+            /\b(787-?\d{1,2})\b/i, /\b(787)\b/i,
+            /\b(767-?\d{3}\w*)\b/i, /\b(767)\b/i,
+            /\b(747-?\d{3}\w*)\b/i,
+            /\b(C919\w*)\b/i, /\b(ARJ21)\b/i,
+            /\b(E195-?E2)\b/i, /\b(E190-?E2)\b/i, /\b(E175-?E2)\b/i,
+            /\b(E2)\b/i,
+            /\b(ATR\s*72-?\d*)\b/i, /\b(ATR\s*42-?\d*)\b/i
+        ];
+        for (const rx of typePatterns) {
+            const m = t.match(rx);
+            if (m) {
+                result.type = m[1].trim();
+                if (!result.oem) {
+                    if (/^A[0-9]/.test(result.type)) result.oem = 'Airbus';
+                    else if (/^7[0-9]/.test(result.type) || /MAX/i.test(result.type)) result.oem = 'Boeing';
+                    else if (/^E[0-9]|^E2$/i.test(result.type)) result.oem = 'Embraer';
+                    else if (/^C919|^ARJ/i.test(result.type)) result.oem = 'COMAC';
+                    else if (/^ATR/i.test(result.type)) result.oem = 'ATR';
+                }
+                break;
+            }
+        }
+
+        const qtyPatterns = [
+            /\b(\d{1,4})\s*(?:aircraft|planes?|jets?|units?|firm|order)/i,
+            /(?:order|orders|ordered|buy|buys|purchase|purchases|deal for|signs? for)\s+(\d{1,4})\b/i,
+            /\b(\d{1,4})\s*(?:A3\d{2}|A2\d{2}|737|777|787|767|E1\d{2}|E2|ATR|C919|ARJ)/i,
+            /(?:A3\d{2}\w*|A2\d{2}\w*|737\s*MAX\w*|777\w*|787\w*|E\d{3}\w*)\s+.*?\b(\d{1,4})\b/i
+        ];
+        for (const rx of qtyPatterns) {
+            const m = t.match(rx);
+            if (m && parseInt(m[1]) > 0 && parseInt(m[1]) <= 1000) {
+                result.qty = m[1];
+                break;
+            }
+        }
+
+        return result;
     }
+
+    // ── Show Order Modal ──────────────────────────────────────────
+    function showOrderModal(newsItem) {
+        if (!newsItem) return;
+
+        const parsed = parseHeadlineForOrder(newsItem.title);
+        const dateStr = newsItem.date ? formatNewsDate(newsItem.date) : '';
+
+        document.getElementById('orderModalHeadline').textContent = newsItem.title;
+        document.getElementById('orderModalDate').value = dateStr;
+        document.getElementById('orderModalAirline').value = parsed.airline;
+        document.getElementById('orderModalOem').value = parsed.oem;
+        document.getElementById('orderModalType').value = parsed.type;
+        document.getElementById('orderModalQty').value = parsed.qty;
+        document.getElementById('orderModalStatus').value = 'Order';
+        document.getElementById('orderModalValue').value = '';
+        document.getElementById('orderModalNotes').value = 'Source: ' + (newsItem.source || 'RSS feed');
+
+        orderModalOverlay.classList.add('active');
+    }
+
+    // ── Order Modal Button Handlers ───────────────────────────────
+    document.getElementById('orderModalCancelBtn').addEventListener('click', function() {
+        orderModalOverlay.classList.remove('active');
+    });
+    orderModalOverlay.addEventListener('click', function(e) {
+        if (e.target === orderModalOverlay) orderModalOverlay.classList.remove('active');
+    });
+
+    document.getElementById('orderModalAddBtn').addEventListener('click', function() {
+        const date = document.getElementById('orderModalDate').value.trim();
+        const airline = document.getElementById('orderModalAirline').value.trim();
+        const oem = document.getElementById('orderModalOem').value;
+        const type = document.getElementById('orderModalType').value.trim();
+        const qty = document.getElementById('orderModalQty').value.trim();
+        const status = document.getElementById('orderModalStatus').value;
+        const value = document.getElementById('orderModalValue').value.trim() || '—';
+        const notes = document.getElementById('orderModalNotes').value.trim();
+
+        if (!date || !oem || !type || !qty) {
+            alert('Please fill in at least Date, OEM, Aircraft Type, and Quantity.');
+            return;
+        }
+
+        const newOrder = {
+            date: date,
+            airline: airline || '—',
+            oem: oem,
+            type: type,
+            qty: qty,
+            status: status,
+            value: value,
+            notes: notes
+        };
+
+        // Write to shared localStorage key
+        let local = [];
+        try { local = JSON.parse(localStorage.getItem('qc_dashboard_local_orders') || '[]'); }
+        catch (e) { local = []; }
+        local.unshift(newOrder);
+        localStorage.setItem('qc_dashboard_local_orders', JSON.stringify(local));
+
+        orderModalOverlay.classList.remove('active');
+        showToast('Order pushed: ' + qty + '\u00d7 ' + type + ' (' + oem + ')');
+    });
 
     ctxMenu.addEventListener('click', function(e) {
         const item = e.target.closest('.ctx-item');
