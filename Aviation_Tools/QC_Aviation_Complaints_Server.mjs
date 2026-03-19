@@ -324,6 +324,612 @@ function processPost(rawPost, config) {
     return rawPost;
 }
 
+// ===== SOURCE FETCHERS =====
+
+/**
+ * httpsPost(url, body, headers) — performs an HTTPS POST and returns the response body.
+ * Used by fetchReddit for OAuth token acquisition.
+ */
+function httpsPost(url, body, extraHeaders = {}) {
+    return new Promise((resolve, reject) => {
+        const parsed = new URL(url);
+        const postData = Buffer.from(body, 'utf8');
+        const options = {
+            hostname: parsed.hostname,
+            path:     parsed.pathname + parsed.search,
+            method:   'POST',
+            headers:  Object.assign({
+                'Content-Type':   'application/x-www-form-urlencoded',
+                'Content-Length': postData.length
+            }, extraHeaders)
+        };
+
+        const req = https.request(options, (res) => {
+            let data = '';
+            res.on('data', chunk => data += chunk);
+            res.on('end', () => resolve(data));
+        });
+
+        req.on('error', reject);
+        req.write(postData);
+        req.end();
+    });
+}
+
+/**
+ * fetchRSS(sourceConfig) — fetches and parses RSS feeds defined in sourceConfig.feeds.
+ * Filters items by sourceConfig.keywords and normalises to the standard post schema.
+ * Returns an array of normalised post objects (up to maxPostsPerFetch total).
+ */
+async function fetchRSS(sourceConfig) {
+    const results = [];
+    const keywords = (sourceConfig.keywords || []).map(k => k.toLowerCase());
+    const maxPosts = sourceConfig.maxPostsPerFetch || 20;
+
+    for (const feed of (sourceConfig.feeds || [])) {
+        if (results.length >= maxPosts) break;
+
+        let xml = '';
+        try {
+            xml = await httpsGet(feed.url);
+        } catch (err) {
+            console.warn('[RSS] Failed to fetch feed:', feed.url, '-', err.message);
+            continue;
+        }
+
+        const items = parseRSSItems(xml);
+
+        for (const item of items) {
+            if (results.length >= maxPosts) break;
+
+            // Keyword filter — match any keyword against title + description
+            const searchText = ((item.title || '') + ' ' + (item.description || '')).toLowerCase();
+            const matches = keywords.length === 0 || keywords.some(kw => searchText.includes(kw));
+            if (!matches) continue;
+
+            // Parse date with fallback to current date for invalid values
+            let dateStr;
+            try {
+                const d = new Date(item.pubDate);
+                dateStr = isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
+            } catch (_) {
+                dateStr = new Date().toISOString();
+            }
+
+            const feedName = feed.name || feed.label || feed.url;
+            results.push({
+                id:           'rss_' + hashString(item.link || item.title),
+                source:       'rss',
+                sourceDetail: feedName,
+                author:       feedName,
+                date:         dateStr,
+                title:        item.title,
+                body:         stripHTML(item.description),
+                url:          item.link
+            });
+        }
+    }
+
+    return results;
+}
+
+/**
+ * fetchReddit(sourceConfig, keys) — authenticates with the Reddit OAuth API
+ * and fetches recent posts from each subreddit in sourceConfig.subreddits.
+ * Filters by keywords and normalises to the standard post schema.
+ * Returns an array of normalised post objects (up to maxPostsPerFetch total).
+ */
+async function fetchReddit(sourceConfig, keys) {
+    if (!keys || !keys.reddit || !keys.reddit.clientId) {
+        console.warn('[Reddit] No clientId configured in keys.json — skipping Reddit source.');
+        return [];
+    }
+
+    const { clientId, clientSecret, userAgent } = keys.reddit;
+    const ua = userAgent || 'QC-Aviation-Complaints/1.0';
+
+    // Acquire OAuth access token using client credentials grant
+    let accessToken;
+    try {
+        const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
+        const tokenResponse = await httpsPost(
+            'https://www.reddit.com/api/v1/access_token',
+            'grant_type=client_credentials',
+            {
+                'Authorization': 'Basic ' + credentials,
+                'User-Agent':    ua
+            }
+        );
+        const tokenData = JSON.parse(tokenResponse);
+        accessToken = tokenData.access_token;
+        if (!accessToken) {
+            console.warn('[Reddit] Token acquisition failed:', tokenData.error || 'unknown error');
+            return [];
+        }
+    } catch (err) {
+        console.warn('[Reddit] Token request error:', err.message);
+        return [];
+    }
+
+    const results = [];
+    const keywords = (sourceConfig.keywords || []).map(k => k.toLowerCase());
+    const maxPosts = sourceConfig.maxPostsPerFetch || 25;
+    const rateLimitMs = sourceConfig.rateLimitMs || 1000;
+
+    for (const subreddit of (sourceConfig.subreddits || [])) {
+        if (results.length >= maxPosts) break;
+
+        try {
+            const feedUrl = `https://oauth.reddit.com/r/${subreddit}/new.json?limit=25`;
+            const rawResponse = await httpsGet(feedUrl.replace('https://', 'https://'));
+
+            // httpsGet uses default User-Agent — for Reddit OAuth we need a custom one.
+            // Re-fetch with correct headers using a manual HTTPS call.
+            const redditResponse = await new Promise((resolve, reject) => {
+                const parsed = new URL(feedUrl);
+                const options = {
+                    hostname: parsed.hostname,
+                    path:     parsed.pathname + parsed.search,
+                    method:   'GET',
+                    headers:  {
+                        'Authorization': 'Bearer ' + accessToken,
+                        'User-Agent':    ua
+                    }
+                };
+                const req = https.request(options, (res) => {
+                    let data = '';
+                    res.on('data', chunk => data += chunk);
+                    res.on('end', () => resolve(data));
+                });
+                req.on('error', reject);
+                req.end();
+            });
+
+            const parsed = JSON.parse(redditResponse);
+            const posts = (parsed.data && parsed.data.children) ? parsed.data.children : [];
+
+            for (const post of posts) {
+                if (results.length >= maxPosts) break;
+                const d = post.data || {};
+
+                // Keyword filter
+                const searchText = ((d.title || '') + ' ' + (d.selftext || '')).toLowerCase();
+                const matches = keywords.length === 0 || keywords.some(kw => searchText.includes(kw));
+                if (!matches) continue;
+
+                results.push({
+                    id:           'reddit_' + d.id,
+                    source:       'reddit',
+                    sourceDetail: 'r/' + subreddit,
+                    author:       d.author,
+                    date:         new Date(d.created_utc * 1000).toISOString(),
+                    title:        d.title,
+                    body:         d.selftext || '',
+                    url:          'https://reddit.com' + d.permalink
+                });
+            }
+        } catch (err) {
+            console.warn('[Reddit] Failed to fetch r/' + subreddit + ':', err.message);
+        }
+
+        await sleep(rateLimitMs);
+    }
+
+    return results;
+}
+
+/**
+ * fetchEASA(sourceConfig) — fetches the EASA Airworthiness Directives RSS feed.
+ * All ADs are included — no keyword filtering applied (all ADs are relevant).
+ * Returns an array of normalised post objects (up to maxPostsPerFetch total).
+ */
+async function fetchEASA(sourceConfig) {
+    const results = [];
+    const maxPosts = sourceConfig.maxPostsPerFetch || 30;
+
+    // Use the adList endpoint URL, or fall back to the rss property if present
+    const feedUrl = (sourceConfig.endpoints && sourceConfig.endpoints.adList)
+        ? sourceConfig.endpoints.adList
+        : (sourceConfig.url || sourceConfig.baseUrl);
+
+    if (!feedUrl) {
+        console.warn('[EASA] No feed URL configured — skipping EASA source.');
+        return [];
+    }
+
+    let xml = '';
+    try {
+        xml = await httpsGet(feedUrl);
+    } catch (err) {
+        console.warn('[EASA] Failed to fetch AD feed:', err.message);
+        return [];
+    }
+
+    const items = parseRSSItems(xml);
+
+    for (const item of items) {
+        if (results.length >= maxPosts) break;
+
+        let dateStr;
+        try {
+            const d = new Date(item.pubDate);
+            dateStr = isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
+        } catch (_) {
+            dateStr = new Date().toISOString();
+        }
+
+        results.push({
+            id:           'easa_' + hashString(item.link),
+            source:       'easa',
+            sourceDetail: 'EASA Airworthiness Directives',
+            author:       'EASA',
+            date:         dateStr,
+            title:        item.title,
+            body:         stripHTML(item.description),
+            url:          item.link
+        });
+    }
+
+    return results;
+}
+
+/**
+ * fetchSkytrax(sourceConfig) — scrapes Skytrax airline review pages.
+ * Extracts reviews using regex patterns and filters for low-rated (<=3) reviews.
+ * Each airline in sourceConfig.airlines is fetched separately with rate-limit delays.
+ * Returns an array of normalised post objects (up to maxPostsPerFetch total).
+ */
+async function fetchSkytrax(sourceConfig) {
+    const results = [];
+    const maxPosts = sourceConfig.maxPostsPerFetch || 20;
+    const rateLimitMs = sourceConfig.rateLimitMs || 3000;
+
+    // Build the airlines list — config may supply an explicit array, or we derive
+    // slugs from the reviews endpoint path.
+    const airlines = sourceConfig.airlines || [];
+    const baseUrl = sourceConfig.baseUrl || 'https://www.airlinequality.com';
+
+    // If no airlines list configured, attempt to use a small default set of
+    // commonly reviewed carriers so the fetcher is functional out-of-box.
+    const targets = airlines.length > 0 ? airlines : [
+        'qantas-airways',
+        'singapore-airlines',
+        'emirates',
+        'ryanair',
+        'united-airlines',
+        'american-airlines',
+        'british-airways'
+    ];
+
+    for (const airline of targets) {
+        if (results.length >= maxPosts) break;
+
+        try {
+            const reviewUrl = `${baseUrl}/airline-reviews/${airline}/`;
+            const html = await httpsGet(reviewUrl);
+
+            // Extract review components using regex — best-effort HTML scraping
+            const titleRe  = /<h2[^>]*class="[^"]*text_header[^"]*"[^>]*>([\s\S]*?)<\/h2>/gi;
+            const bodyRe   = /<div[^>]*class="[^"]*text_content[^"]*"[^>]*>([\s\S]*?)<\/div>/gi;
+            const ratingRe = /<span[^>]*itemprop="ratingValue"[^>]*>([\s\S]*?)<\/span>/gi;
+            const dateRe   = /<time[^>]*datetime="([^"]*)"[^>]*>/gi;
+
+            const titles  = [];
+            const bodies  = [];
+            const ratings = [];
+            const dates   = [];
+
+            let m;
+            while ((m = titleRe.exec(html))  !== null) titles.push(stripHTML(m[1]));
+            while ((m = bodyRe.exec(html))   !== null) bodies.push(stripHTML(m[1]));
+            while ((m = ratingRe.exec(html)) !== null) ratings.push(parseFloat(m[1]));
+            while ((m = dateRe.exec(html))   !== null) dates.push(m[1]);
+
+            const reviewCount = Math.max(titles.length, ratings.length);
+
+            for (let i = 0; i < reviewCount; i++) {
+                if (results.length >= maxPosts) break;
+
+                const rating = ratings[i] !== undefined ? ratings[i] : null;
+
+                // Filter: only complaints (rating <= 3); if no rating, include anyway
+                if (rating !== null && rating > 3) continue;
+
+                const title = titles[i] || `${airline} review`;
+                const body  = bodies[i] || '';
+                let dateStr;
+                try {
+                    const d = new Date(dates[i] || '');
+                    dateStr = isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
+                } catch (_) {
+                    dateStr = new Date().toISOString();
+                }
+
+                const uid = hashString(airline + '_' + i + '_' + title);
+                results.push({
+                    id:           'skytrax_' + uid,
+                    source:       'skytrax',
+                    sourceDetail: airline,
+                    author:       'Skytrax reviewer',
+                    date:         dateStr,
+                    title:        title,
+                    body:         body,
+                    url:          reviewUrl
+                });
+            }
+        } catch (err) {
+            console.warn('[Skytrax] Failed to fetch reviews for airline:', airline, '-', err.message);
+            // Individual airline failures do not block others
+        }
+
+        await sleep(rateLimitMs);
+    }
+
+    return results;
+}
+
+/**
+ * fetchPPRuNe(sourceConfig) — scrapes Professional Pilots Rumour Network (PPRuNe) forums.
+ * Extracts thread titles and URLs from forum index pages using regex.
+ * Returns an array of normalised post objects (up to maxPostsPerFetch total).
+ */
+async function fetchPPRuNe(sourceConfig) {
+    const results = [];
+    const forums = sourceConfig.forums || [];
+    const maxPosts = sourceConfig.maxPostsPerFetch || 20;
+    const rateLimitMs = sourceConfig.rateLimitMs || 4000;
+
+    // Distribute the post budget evenly across forums
+    const perForum = forums.length > 0 ? Math.ceil(maxPosts / forums.length) : maxPosts;
+
+    for (const forum of forums) {
+        if (results.length >= maxPosts) break;
+
+        try {
+            const html = await httpsGet(forum.url);
+            const forumName = forum.name || forum.label || forum.url;
+
+            // Extract thread titles and links — best-effort regex for vBulletin-style markup
+            const threadRe = /<a[^>]+href="([^"]*)"[^>]*class="[^"]*title[^"]*"[^>]*>([\s\S]*?)<\/a>/gi;
+            // Fallback: look for thread title links more broadly
+            const fallbackRe = /<td[^>]*class="[^"]*alt[12][^"]*"[^>]*>[\s\S]*?<a[^>]+href="(\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+
+            const threads = [];
+            let m;
+            while ((m = threadRe.exec(html)) !== null) {
+                const url   = m[1].startsWith('http') ? m[1] : sourceConfig.baseUrl + m[1];
+                const title = stripHTML(m[2]).trim();
+                if (title) threads.push({ url, title });
+            }
+
+            // Try fallback pattern if primary found nothing
+            if (threads.length === 0) {
+                while ((m = fallbackRe.exec(html)) !== null) {
+                    const url   = m[1].startsWith('http') ? m[1] : (sourceConfig.baseUrl || 'https://www.pprune.org') + m[1];
+                    const title = stripHTML(m[2]).trim();
+                    if (title) threads.push({ url, title });
+                }
+            }
+
+            const limit = Math.min(perForum, threads.length, maxPosts - results.length);
+
+            for (let i = 0; i < limit; i++) {
+                const thread = threads[i];
+                results.push({
+                    id:           'pprune_' + hashString(thread.url),
+                    source:       'pprune',
+                    sourceDetail: forumName,
+                    author:       'PPRuNe member',
+                    date:         new Date().toISOString(), // Thread dates require deeper parsing
+                    title:        thread.title,
+                    body:         '',
+                    url:          thread.url
+                });
+            }
+        } catch (err) {
+            console.warn('[PPRuNe] Failed to fetch forum:', forum.url, '-', err.message);
+            // Individual forum failures do not block others
+        }
+
+        await sleep(rateLimitMs);
+    }
+
+    return results;
+}
+
+/**
+ * fetchYouTube(sourceConfig, keys) — queries YouTube Data API v3 for recent videos
+ * on configured channels, then fetches comments and filters by keywords.
+ * Requires a YouTube Data API key in keys.youtube.apiKey.
+ * Returns an array of normalised post objects (up to maxPostsPerFetch total).
+ */
+async function fetchYouTube(sourceConfig, keys) {
+    if (!keys || !keys.youtube || !keys.youtube.apiKey) {
+        console.warn('[YouTube] No API key configured in keys.json — skipping YouTube source.');
+        return [];
+    }
+
+    const apiKey = keys.youtube.apiKey;
+    const results = [];
+    const keywords = (sourceConfig.keywords || []).map(k => k.toLowerCase());
+    const maxPosts = sourceConfig.maxPostsPerFetch || 10;
+    const channels = sourceConfig.channels || [];
+
+    for (const channelId of channels) {
+        if (results.length >= maxPosts) break;
+
+        try {
+            // Search for recent videos on this channel
+            const searchUrl = `https://www.googleapis.com/youtube/v3/search?key=${apiKey}&channelId=${channelId}&part=snippet&order=date&maxResults=5&type=video`;
+            const searchRaw = await httpsGet(searchUrl);
+            const searchData = JSON.parse(searchRaw);
+
+            const videos = (searchData.items || []);
+
+            for (const video of videos) {
+                if (results.length >= maxPosts) break;
+
+                const videoId = video.id && video.id.videoId;
+                if (!videoId) continue;
+
+                // Fetch comments for this video
+                try {
+                    const commentsUrl = `https://www.googleapis.com/youtube/v3/commentThreads?key=${apiKey}&videoId=${videoId}&part=snippet&maxResults=50`;
+                    const commentsRaw = await httpsGet(commentsUrl);
+                    const commentsData = JSON.parse(commentsRaw);
+
+                    for (const thread of (commentsData.items || [])) {
+                        if (results.length >= maxPosts) break;
+
+                        const comment = thread.snippet && thread.snippet.topLevelComment;
+                        if (!comment) continue;
+                        const snip = comment.snippet || {};
+
+                        const commentText = (snip.textDisplay || snip.textOriginal || '').toLowerCase();
+                        const matches = keywords.length === 0 || keywords.some(kw => commentText.includes(kw));
+                        if (!matches) continue;
+
+                        let dateStr;
+                        try {
+                            const d = new Date(snip.publishedAt || '');
+                            dateStr = isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
+                        } catch (_) {
+                            dateStr = new Date().toISOString();
+                        }
+
+                        results.push({
+                            id:           'youtube_' + hashString(comment.id || commentText),
+                            source:       'youtube',
+                            sourceDetail: channelId,
+                            author:       snip.authorDisplayName || 'YouTube user',
+                            date:         dateStr,
+                            title:        (video.snippet && video.snippet.title) || 'YouTube comment',
+                            body:         stripHTML(snip.textDisplay || snip.textOriginal || ''),
+                            url:          `https://www.youtube.com/watch?v=${videoId}`
+                        });
+                    }
+                } catch (err) {
+                    console.warn('[YouTube] Failed to fetch comments for video:', videoId, '-', err.message);
+                }
+            }
+        } catch (err) {
+            console.warn('[YouTube] Failed to fetch videos for channel:', channelId, '-', err.message);
+        }
+    }
+
+    return results;
+}
+
+/**
+ * fetchTwitter(sourceConfig, keys) — queries Twitter/X API v2 recent tweet search.
+ * Requires paid API access ($100/month Basic tier).
+ * Requires a Twitter Bearer Token in keys.twitter.bearerToken.
+ * Returns an array of normalised post objects (up to maxPostsPerFetch total).
+ */
+async function fetchTwitter(sourceConfig, keys) {
+    if (!keys || !keys.twitter || !keys.twitter.bearerToken) {
+        console.warn('[Twitter] No bearerToken configured in keys.json — skipping Twitter source.');
+        return [];
+    }
+
+    const bearerToken = keys.twitter.bearerToken;
+    const keywords = sourceConfig.keywords || [];
+    const maxPosts = sourceConfig.maxPostsPerFetch || 50;
+    const results = [];
+
+    // Build query by joining keywords with OR
+    const query = keywords.map(k => `"${k}"`).join(' OR ') + ' lang:en';
+
+    try {
+        const searchUrl = new URL('https://api.twitter.com/2/tweets/search/recent');
+        searchUrl.searchParams.set('query', query);
+        searchUrl.searchParams.set('max_results', String(Math.min(maxPosts, 100)));
+        searchUrl.searchParams.set('tweet.fields', 'created_at,author_id,text');
+        searchUrl.searchParams.set('expansions', 'author_id');
+        searchUrl.searchParams.set('user.fields', 'username');
+
+        const twitterResponse = await new Promise((resolve, reject) => {
+            const options = {
+                hostname: 'api.twitter.com',
+                path:     searchUrl.pathname + searchUrl.search,
+                method:   'GET',
+                headers:  {
+                    'Authorization': 'Bearer ' + bearerToken,
+                    'User-Agent':    'QC-Aviation-Complaints/1.0'
+                }
+            };
+            const req = https.request(options, (res) => {
+                let data = '';
+                res.on('data', chunk => data += chunk);
+                res.on('end', () => resolve(data));
+            });
+            req.on('error', reject);
+            req.end();
+        });
+
+        const twitterData = JSON.parse(twitterResponse);
+
+        // Build a username lookup map from the includes block
+        const usersMap = {};
+        if (twitterData.includes && twitterData.includes.users) {
+            for (const user of twitterData.includes.users) {
+                usersMap[user.id] = user.username;
+            }
+        }
+
+        for (const tweet of (twitterData.data || [])) {
+            if (results.length >= maxPosts) break;
+
+            let dateStr;
+            try {
+                const d = new Date(tweet.created_at || '');
+                dateStr = isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
+            } catch (_) {
+                dateStr = new Date().toISOString();
+            }
+
+            const username = usersMap[tweet.author_id] || tweet.author_id;
+            results.push({
+                id:           'twitter_' + tweet.id,
+                source:       'twitter',
+                sourceDetail: 'Twitter/X search',
+                author:       '@' + username,
+                date:         dateStr,
+                title:        (tweet.text || '').slice(0, 100),
+                body:         tweet.text || '',
+                url:          `https://twitter.com/i/web/status/${tweet.id}`
+            });
+        }
+    } catch (err) {
+        console.warn('[Twitter] Failed to fetch tweets:', err.message);
+    }
+
+    return results;
+}
+
+/**
+ * fetchFAASDR(sourceConfig) — FAA Service Difficulty Reports (SDR) stub.
+ * Automated fetching is not yet implemented — records must be added manually
+ * via the /api/manual-add endpoint.
+ * Returns an empty array.
+ */
+async function fetchFAASDR(sourceConfig) {
+    console.log('[FAA SDR] Automated fetching not yet implemented — use Manual Add.');
+    return [];
+}
+
+// ===== SOURCE FETCHER REGISTRY =====
+const SOURCE_FETCHERS = {
+    reddit:  fetchReddit,
+    rss:     fetchRSS,
+    easa:    fetchEASA,
+    skytrax: fetchSkytrax,
+    pprune:  fetchPPRuNe,
+    youtube: fetchYouTube,
+    twitter: fetchTwitter,
+    faa_sdr: fetchFAASDR
+};
+
 // ===== SSE BROADCAST =====
 function sendSSE(data) {
     const payload = 'data: ' + JSON.stringify(data) + '\n\n';
