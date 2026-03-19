@@ -1083,17 +1083,282 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
-    // ---- GET /api/complaints — paginated complaints list (stub) ----
+    // ---- GET /api/complaints — paginated complaints list ----
     if (req.method === 'GET' && url === '/api/complaints') {
-        res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
-        res.end(JSON.stringify({ total: 0, page: 1, limit: 50, posts: [] }));
+        try {
+            const parsedUrl = new URL(req.url, 'http://localhost');
+            const sp = parsedUrl.searchParams;
+
+            const filterCategory = sp.get('category') || null;
+            const filterRegion   = sp.get('region')   || null;
+            const filterSource   = sp.get('source')   || null;
+            const filterDateFrom = sp.get('dateFrom') || null;
+            const filterDateTo   = sp.get('dateTo')   || null;
+            const filterSearch   = sp.get('search')   || null;
+            const page           = Math.max(1, parseInt(sp.get('page')  || '1',  10));
+            const limit          = Math.max(1, parseInt(sp.get('limit') || '50', 10));
+
+            // Load main archive
+            const archive = readJSON(DATA_FILE);
+            let posts = Array.isArray(archive.posts) ? [...archive.posts] : [];
+
+            // Merge yearly archive files
+            try {
+                const archiveFiles = fs.readdirSync(__dirname)
+                    .filter(f => /^QC_Aviation_Complaints_archive_\d+\.json$/.test(f));
+                for (const archiveFile of archiveFiles) {
+                    const yearData = readJSON(path.join(__dirname, archiveFile));
+                    if (Array.isArray(yearData.posts)) {
+                        posts.push(...yearData.posts);
+                    }
+                }
+            } catch (archiveErr) {
+                console.warn('[complaints] Failed to read archive files:', archiveErr.message);
+            }
+
+            // Apply filters
+            if (filterCategory) {
+                posts = posts.filter(p => {
+                    const cats = p.manualCategories || p.autoCategories || [];
+                    return Array.isArray(cats) && cats.includes(filterCategory);
+                });
+            }
+
+            if (filterRegion) {
+                posts = posts.filter(p => p.region === filterRegion || p.region === 'global');
+            }
+
+            if (filterSource) {
+                posts = posts.filter(p => p.source === filterSource);
+            }
+
+            if (filterDateFrom) {
+                posts = posts.filter(p => p.date >= filterDateFrom);
+            }
+
+            if (filterDateTo) {
+                posts = posts.filter(p => p.date <= filterDateTo);
+            }
+
+            if (filterSearch) {
+                const searchLower = filterSearch.toLowerCase();
+                posts = posts.filter(p => {
+                    const text = ((p.title || '') + ' ' + (p.body || '')).toLowerCase();
+                    return text.includes(searchLower);
+                });
+            }
+
+            // Sort newest first
+            posts.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+
+            const total = posts.length;
+            const paginated = posts.slice((page - 1) * limit, page * limit);
+
+            res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+            res.end(JSON.stringify({ total, page, limit, posts: paginated }));
+        } catch (err) {
+            console.error('[GET /api/complaints] Error:', err.message);
+            res.writeHead(500, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+            res.end(JSON.stringify({ error: err.message }));
+        }
         return;
     }
 
-    // ---- GET /api/summary — aggregated summary statistics (stub) ----
+    // ---- GET /api/summary — aggregated summary statistics ----
     if (req.method === 'GET' && url === '/api/summary') {
-        res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
-        res.end(JSON.stringify({}));
+        try {
+            const parsedUrl = new URL(req.url, 'http://localhost');
+            const sp = parsedUrl.searchParams;
+
+            const days         = Math.max(1, parseInt(sp.get('days') || '30', 10));
+            const filterRegion = sp.get('region') || null;
+
+            // Load main archive
+            const archive = readJSON(DATA_FILE);
+            let allPosts = Array.isArray(archive.posts) ? [...archive.posts] : [];
+
+            // Merge yearly archive files
+            try {
+                const archiveFiles = fs.readdirSync(__dirname)
+                    .filter(f => /^QC_Aviation_Complaints_archive_\d+\.json$/.test(f));
+                for (const archiveFile of archiveFiles) {
+                    const yearData = readJSON(path.join(__dirname, archiveFile));
+                    if (Array.isArray(yearData.posts)) {
+                        allPosts.push(...yearData.posts);
+                    }
+                }
+            } catch (archiveErr) {
+                console.warn('[summary] Failed to read archive files:', archiveErr.message);
+            }
+
+            // Apply region filter
+            if (filterRegion) {
+                allPosts = allPosts.filter(p => p.region === filterRegion || p.region === 'global');
+            }
+
+            // Date windows
+            const now        = new Date();
+            const dateFrom   = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+            const prevDateTo = new Date(dateFrom.getTime());
+            const prevDateFrom = new Date(dateFrom.getTime() - days * 24 * 60 * 60 * 1000);
+
+            const currentPosts  = allPosts.filter(p => p.date >= dateFrom.toISOString() && p.date <= now.toISOString());
+            const previousPosts = allPosts.filter(p => p.date >= prevDateFrom.toISOString() && p.date < prevDateTo.toISOString());
+
+            // Category breakdown
+            const CATEGORIES = ['technology', 'airframe_manufacturer', 'engine_manufacturer', 'airline_operations', 'regulatory', 'mro_maintenance'];
+
+            const categoryBreakdown = {};
+            for (const cat of CATEGORIES) {
+                const currentCount  = currentPosts.filter(p => {
+                    const cats = p.manualCategories || p.autoCategories || [];
+                    return Array.isArray(cats) && cats.includes(cat);
+                }).length;
+                const previousCount = previousPosts.filter(p => {
+                    const cats = p.manualCategories || p.autoCategories || [];
+                    return Array.isArray(cats) && cats.includes(cat);
+                }).length;
+                const growth = previousCount === 0 ? 0 : Math.round((currentCount - previousCount) / previousCount * 100);
+                categoryBreakdown[cat] = { count: currentCount, growth };
+            }
+
+            // Trend data — one entry per day in the current period
+            const trendData = [];
+            for (let i = 0; i < days; i++) {
+                const dayStart = new Date(dateFrom.getTime() + i * 24 * 60 * 60 * 1000);
+                const dayEnd   = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
+                const dayStr   = dayStart.toISOString().slice(0, 10);
+                const dayPosts = currentPosts.filter(p => p.date >= dayStart.toISOString() && p.date < dayEnd.toISOString());
+
+                const entry = { date: dayStr };
+                for (const cat of CATEGORIES) {
+                    entry[cat] = dayPosts.filter(p => {
+                        const cats = p.manualCategories || p.autoCategories || [];
+                        return Array.isArray(cats) && cats.includes(cat);
+                    }).length;
+                }
+                trendData.push(entry);
+            }
+
+            // Manufacturer breakdown
+            let config;
+            try {
+                config = loadCategories();
+            } catch (_) {
+                config = { entities: { airframe_oems: [], engine_oems: [] } };
+            }
+
+            const knownManufacturers = [
+                ...(config.entities.airframe_oems || []),
+                ...(config.entities.engine_oems   || [])
+            ];
+
+            const manufacturers = {};
+            for (const post of currentPosts) {
+                const postEntities = post.entities || [];
+                const postCats = post.manualCategories || post.autoCategories || [];
+                for (const mfr of knownManufacturers) {
+                    if (postEntities.includes(mfr)) {
+                        if (!manufacturers[mfr]) {
+                            manufacturers[mfr] = {};
+                            for (const cat of CATEGORIES) manufacturers[mfr][cat] = 0;
+                        }
+                        for (const cat of CATEGORIES) {
+                            if (Array.isArray(postCats) && postCats.includes(cat)) {
+                                manufacturers[mfr][cat]++;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Remove manufacturers with zero appearances
+            for (const mfr of Object.keys(manufacturers)) {
+                const total = CATEGORIES.reduce((sum, cat) => sum + manufacturers[mfr][cat], 0);
+                if (total === 0) delete manufacturers[mfr];
+            }
+
+            // Cluster detection — group by primary entity, 5+ posts
+            const entityGroups = {};
+            for (const post of currentPosts) {
+                const primaryEntity = (post.entities && post.entities[0]) || null;
+                if (!primaryEntity) continue;
+                if (!entityGroups[primaryEntity]) entityGroups[primaryEntity] = [];
+                entityGroups[primaryEntity].push(post);
+            }
+
+            const clusters = [];
+            for (const [entity, posts] of Object.entries(entityGroups)) {
+                if (posts.length < 5) continue;
+
+                const prevCount = previousPosts.filter(p =>
+                    p.entities && p.entities[0] === entity
+                ).length;
+
+                const growth = prevCount === 0 ? 0 : Math.round((posts.length - prevCount) / prevCount * 100);
+
+                // Most common category
+                const catCounts = {};
+                for (const p of posts) {
+                    const cats = p.manualCategories || p.autoCategories || [];
+                    for (const cat of (Array.isArray(cats) ? cats : [])) {
+                        catCounts[cat] = (catCounts[cat] || 0) + 1;
+                    }
+                }
+                const topCat = Object.entries(catCounts).sort((a, b) => b[1] - a[1]).map(e => e[0]).slice(0, 1);
+
+                // Most frequent source
+                const srcCounts = {};
+                for (const p of posts) {
+                    srcCounts[p.source] = (srcCounts[p.source] || 0) + 1;
+                }
+                const topSource = Object.entries(srcCounts).sort((a, b) => b[1] - a[1]).map(e => e[0])[0] || 'unknown';
+
+                clusters.push({
+                    name:         entity + ' Issues',
+                    entity,
+                    count:        posts.length,
+                    growth,
+                    categories:   topCat,
+                    topSource,
+                    isOpportunity: growth > 20
+                });
+            }
+            clusters.sort((a, b) => b.count - a.count);
+
+            // Region counts
+            const regionKeys = ['apac', 'emea', 'americas', 'middle_east', 'africa', 'global'];
+            const regionCounts = {};
+            for (const rk of regionKeys) regionCounts[rk] = 0;
+            for (const post of currentPosts) {
+                if (regionCounts.hasOwnProperty(post.region)) {
+                    regionCounts[post.region]++;
+                }
+            }
+
+            // newSinceLastUpdate
+            const lastUpdate = (archive.metadata && archive.metadata.lastUpdate) || null;
+            const newSinceLastUpdate = lastUpdate
+                ? allPosts.filter(p => p.fetchDate === lastUpdate).length
+                : 0;
+
+            res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+            res.end(JSON.stringify({
+                totalPosts:         (archive.metadata && archive.metadata.totalPosts) || allPosts.length,
+                lastUpdate,
+                period:             { days, from: dateFrom.toISOString(), to: now.toISOString() },
+                newSinceLastUpdate,
+                categoryBreakdown,
+                trendData,
+                manufacturers,
+                clusters,
+                regionCounts
+            }));
+        } catch (err) {
+            console.error('[GET /api/summary] Error:', err.message);
+            res.writeHead(500, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+            res.end(JSON.stringify({ error: err.message }));
+        }
         return;
     }
 
@@ -1128,10 +1393,37 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
-    // ---- POST /api/recategorise — re-run categorisation engine (stub) ----
+    // ---- POST /api/recategorise — update manual categories for a single post ----
     if (req.method === 'POST' && url === '/api/recategorise') {
-        res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
-        res.end(JSON.stringify({ status: 'ok' }));
+        try {
+            const body = await parseBody(req);
+            const { postId, categories } = body;
+
+            if (!postId) {
+                res.writeHead(400, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+                res.end(JSON.stringify({ error: 'postId is required' }));
+                return;
+            }
+
+            const archive = readJSON(DATA_FILE);
+            const post = (archive.posts || []).find(p => p.id === postId);
+
+            if (!post) {
+                res.writeHead(404, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+                res.end(JSON.stringify({ error: 'Post not found', postId }));
+                return;
+            }
+
+            post.manualCategories = Array.isArray(categories) ? categories : null;
+            writeJSON(DATA_FILE, archive);
+
+            res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+            res.end(JSON.stringify({ status: 'ok', postId, categories: post.manualCategories }));
+        } catch (err) {
+            console.error('[POST /api/recategorise] Error:', err.message);
+            res.writeHead(500, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+            res.end(JSON.stringify({ error: err.message }));
+        }
         return;
     }
 
@@ -1142,10 +1434,52 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
-    // ---- POST /api/manual-add — manually add a complaint record (stub) ----
+    // ---- POST /api/manual-add — manually add a complaint record ----
     if (req.method === 'POST' && url === '/api/manual-add') {
-        res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
-        res.end(JSON.stringify({ status: 'ok' }));
+        try {
+            const body = await parseBody(req);
+            const { source, title, body: postBody, url: postUrl, categories, region } = body;
+
+            const config = loadCategories();
+            const postObj = {
+                source:       source || 'manual',
+                title:        title  || '',
+                body:         postBody || ''
+            };
+
+            const now = new Date().toISOString();
+            const newPost = {
+                id:               `manual_${Date.now()}_${hashString(title || '')}`,
+                source:           source || 'manual',
+                sourceDetail:     source || 'Manual Entry',
+                author:           'Manual Entry',
+                date:             now,
+                title:            title  || '',
+                body:             postBody || '',
+                url:              postUrl || '',
+                autoCategories:   categorisePost(postObj, config),
+                manualCategories: (Array.isArray(categories) && categories.length > 0) ? categories : null,
+                sentiment:        'negative',
+                region:           region || 'global',
+                entities:         extractEntities(postObj, config),
+                fetchDate:        now
+            };
+
+            const archive = readJSON(DATA_FILE);
+            if (!Array.isArray(archive.posts)) archive.posts = [];
+            archive.posts.push(newPost);
+            archive.metadata = archive.metadata || {};
+            archive.metadata.totalPosts = archive.posts.length;
+            archive.metadata.lastUpdate = now;
+            writeJSON(DATA_FILE, archive);
+
+            res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+            res.end(JSON.stringify({ status: 'ok', post: newPost }));
+        } catch (err) {
+            console.error('[POST /api/manual-add] Error:', err.message);
+            res.writeHead(500, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+            res.end(JSON.stringify({ error: err.message }));
+        }
         return;
     }
 
