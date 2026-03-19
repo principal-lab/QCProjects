@@ -1557,8 +1557,189 @@
     document.addEventListener('DOMContentLoaded', init);
 
     /* =========================================================
-       Task 9: Chart rendering functions will be added below
+       Task 9: Chart rendering functions
        ========================================================= */
+
+    function renderTrendChart() {
+        if (!STATE.summary || !STATE.summary.trendData) return;
+        const ctx = document.getElementById('trendChart').getContext('2d');
+        if (STATE.trendChartInstance) STATE.trendChartInstance.destroy();
+
+        const labels = STATE.summary.trendData.map(d => {
+            const dt = new Date(d.date);
+            return dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+        });
+
+        const categories = ['technology', 'airframe_manufacturer', 'engine_manufacturer', 'airline_operations', 'regulatory', 'mro_maintenance'];
+        const datasets = categories.map(cat => ({
+            label: CATEGORY_LABELS[cat],
+            data: STATE.summary.trendData.map(d => d[cat] || 0),
+            borderColor: CATEGORY_COLOURS[cat],
+            backgroundColor: CATEGORY_COLOURS[cat] + '20',
+            fill: false,
+            tension: 0.3,
+            pointRadius: 2,
+            borderWidth: 2
+        }));
+
+        STATE.trendChartInstance = new Chart(ctx, {
+            type: 'line',
+            data: { labels, datasets },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: { mode: 'index', intersect: false },
+                plugins: {
+                    legend: { position: 'top', labels: { color: '#8fadc8', boxWidth: 12, font: { size: 10, family: 'Arial' } } },
+                    tooltip: { backgroundColor: '#1a2332', titleColor: '#e0e0e0', bodyColor: '#8fadc8', borderColor: '#2a3a4a', borderWidth: 1 }
+                },
+                scales: {
+                    x: { grid: { color: '#1a2332' }, ticks: { color: '#8fadc8', font: { size: 10, family: 'Arial' }, maxTicksLimit: 10 } },
+                    y: { grid: { color: '#1a2332' }, ticks: { color: '#8fadc8', font: { size: 10, family: 'Arial' } }, beginAtZero: true }
+                }
+            }
+        });
+    }
+
+    function renderCategoryChart() {
+        if (!STATE.summary || !STATE.summary.categoryBreakdown) return;
+        const ctx = document.getElementById('categoryChart').getContext('2d');
+        if (STATE.categoryChartInstance) STATE.categoryChartInstance.destroy();
+
+        const categories = ['technology', 'airframe_manufacturer', 'engine_manufacturer', 'airline_operations', 'regulatory', 'mro_maintenance'];
+        const labels = categories.map(c => CATEGORY_LABELS[c]);
+        const data = categories.map(c => (STATE.summary.categoryBreakdown[c] || {}).count || 0);
+        const colours = categories.map(c => CATEGORY_COLOURS[c]);
+        const growths = categories.map(c => (STATE.summary.categoryBreakdown[c] || {}).growth || 0);
+
+        STATE.categoryChartInstance = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels,
+                datasets: [{
+                    data,
+                    backgroundColor: colours.map(c => c + '80'),
+                    borderColor: colours,
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        backgroundColor: '#1a2332', titleColor: '#e0e0e0', bodyColor: '#8fadc8',
+                        callbacks: {
+                            afterLabel: (ctx) => {
+                                const g = growths[ctx.dataIndex];
+                                return g > 0 ? `\u2191 ${g.toFixed(0)}%` : g < 0 ? `\u2193 ${Math.abs(g).toFixed(0)}%` : '\u2192 0%';
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: { grid: { color: '#1a2332' }, ticks: { color: '#8fadc8', font: { size: 10, family: 'Arial' } }, beginAtZero: true },
+                    y: { grid: { display: false }, ticks: { color: '#e0e0e0', font: { size: 11, family: 'Arial' } } }
+                }
+            }
+        });
+    }
+
+    function renderHeatmap() {
+        if (!STATE.summary || !STATE.summary.manufacturers) return;
+        const container = document.getElementById('heatmapTable');
+        const categories = ['technology', 'airframe_manufacturer', 'engine_manufacturer', 'airline_operations', 'regulatory', 'mro_maintenance'];
+        const manufacturers = Object.entries(STATE.summary.manufacturers);
+
+        if (manufacturers.length === 0) {
+            container.innerHTML = '<p style="color:#8fadc8;text-align:center;font-size:11px;">No manufacturer data yet</p>';
+            return;
+        }
+
+        // Sort by total complaints descending
+        manufacturers.sort((a, b) => {
+            const totalA = categories.reduce((sum, c) => sum + (a[1][c] || 0), 0);
+            const totalB = categories.reduce((sum, c) => sum + (b[1][c] || 0), 0);
+            return totalB - totalA;
+        });
+
+        let html = '<table><thead><tr><th style="text-align:left">Manufacturer</th>';
+        categories.forEach(c => { html += `<th>${CATEGORY_LABELS[c]}</th>`; });
+        html += '</tr></thead><tbody>';
+
+        for (const [name, counts] of manufacturers) {
+            html += `<tr><td style="text-align:left;color:#e0e0e0">${name}</td>`;
+            categories.forEach(cat => {
+                const v = counts[cat] || 0;
+                const bg = v === 0 ? '#111827' : v <= 5 ? '#1a2a1a' : v <= 15 ? '#2a2a1a' : '#2a1a1a';
+                const color = v === 0 ? '#555' : '#e0e0e0';
+                html += `<td style="background:${bg};color:${color};cursor:pointer" onclick="filterByManufacturer('${name.replace(/'/g, "\\'")}','${cat}')">${v}</td>`;
+            });
+            html += '</tr>';
+        }
+        html += '</tbody></table>';
+        container.innerHTML = html;
+    }
+
+    function filterByManufacturer(entity, category) {
+        STATE.filters.search = entity;
+        document.getElementById('feedSearch').value = entity;
+        // Also check the category filter
+        const catCheckbox = document.querySelector(`#filterCategory input[value="${category}"]`);
+        if (catCheckbox && !catCheckbox.checked) {
+            catCheckbox.checked = true;
+            updateFiltersFromDropdowns();
+        }
+        loadComplaints();
+    }
+
+    function renderClusters() {
+        if (!STATE.summary || !STATE.summary.clusters) return;
+        const container = document.getElementById('clustersContainer');
+        const clusters = STATE.summary.clusters;
+
+        if (clusters.length === 0) {
+            container.innerHTML = '<p style="color:#8fadc8;text-align:center;font-size:11px;">No clusters detected yet</p>';
+            return;
+        }
+
+        let html = '';
+        for (const cluster of clusters) {
+            const catColour = CATEGORY_COLOURS[cluster.categories[0]] || '#666';
+            const trendArrow = cluster.growth > 0 ? '\u2191' : cluster.growth < 0 ? '\u2193' : '\u2192';
+            const oppClass = cluster.isOpportunity ? ' opportunity' : '';
+            const oppBadge = cluster.isOpportunity ? '<span class="cluster-badge">Consulting Opportunity</span>' : '';
+
+            html += `
+            <div class="cluster-card${oppClass}" style="border-left-color:${catColour}" onclick="filterByCluster('${cluster.entity.replace(/'/g, "\\'")}')">
+                <div class="cluster-name">${cluster.entity}${oppBadge}</div>
+                <div class="cluster-meta">
+                    ${cluster.count} posts \u00b7 ${trendArrow} ${Math.abs(cluster.growth).toFixed(0)}% \u00b7
+                    <span style="color:${catColour}">${CATEGORY_LABELS[cluster.categories[0]] || cluster.categories[0]}</span> \u00b7
+                    via ${cluster.topSource}
+                </div>
+            </div>`;
+        }
+        container.innerHTML = html;
+    }
+
+    function filterByCluster(entity) {
+        STATE.filters.search = entity;
+        document.getElementById('feedSearch').value = entity;
+        loadComplaints();
+    }
+
+    /* Period toggle wiring */
+    document.querySelectorAll('.chart-toggles .toggle').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.chart-toggles .toggle').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            STATE.days = parseInt(btn.dataset.days);
+            loadSummary();
+        });
+    });
 
     </script>
 </body>
