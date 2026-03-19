@@ -202,6 +202,128 @@ function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+// ===== CATEGORISATION ENGINE =====
+
+// Module-level cache for categories config
+let categoriesCache = null;
+
+/**
+ * loadCategories() — reads CATEGORIES_FILE and caches the result.
+ * Returns the parsed config object. Subsequent calls return the cached value.
+ */
+function loadCategories() {
+    if (categoriesCache) return categoriesCache;
+    const raw = fs.readFileSync(CATEGORIES_FILE, 'utf8');
+    categoriesCache = JSON.parse(raw);
+    return categoriesCache;
+}
+
+/**
+ * categorisePost(post, config) — keyword-weighted scoring across all 6 categories.
+ * Returns array of category keys where total keyword weight >= scoringThreshold.
+ * Falls back to ["uncategorised"] if nothing scores above threshold.
+ */
+function categorisePost(post, config) {
+    const text = ((post.title || '') + ' ' + (post.body || '')).toLowerCase();
+    const threshold = config.scoringThreshold || 15;
+    const matched = [];
+
+    for (const [categoryKey, categoryDef] of Object.entries(config.categories)) {
+        let score = 0;
+        for (const [keyword, weight] of Object.entries(categoryDef.keywords)) {
+            if (text.includes(keyword.toLowerCase())) {
+                score += weight;
+            }
+        }
+        if (score >= threshold) {
+            matched.push(categoryKey);
+        }
+    }
+
+    return matched.length > 0 ? matched : ['uncategorised'];
+}
+
+/**
+ * extractEntities(post, config) — scans post text for known airframe OEMs,
+ * engine OEMs, aircraft types, and airline names. Returns a deduplicated array
+ * of matched entity strings using the original case from config.
+ */
+function extractEntities(post, config) {
+    const text = ((post.title || '') + ' ' + (post.body || '')).toLowerCase();
+    const found = new Set();
+
+    for (const oem of (config.entities.airframe_oems || [])) {
+        if (text.includes(oem.toLowerCase())) {
+            found.add(oem);
+        }
+    }
+
+    for (const oem of (config.entities.engine_oems || [])) {
+        if (text.includes(oem.toLowerCase())) {
+            found.add(oem);
+        }
+    }
+
+    for (const type of (config.entities.aircraft_types || [])) {
+        if (text.includes(type.toLowerCase())) {
+            found.add(type);
+        }
+    }
+
+    for (const airline of Object.keys(config.entities.airlines || {})) {
+        if (text.includes(airline.toLowerCase())) {
+            found.add(airline);
+        }
+    }
+
+    return Array.from(found);
+}
+
+/**
+ * assignRegion(post, config) — region priority chain:
+ *   1. Check post.entities for airline names present in config.entities.airlines → return that airline's region
+ *   2. Check post text for regionSources keywords → return matched region
+ *   3. Fallback → "global"
+ */
+function assignRegion(post, config) {
+    const airlinesMap = config.entities.airlines || {};
+
+    // Priority 1: entity-based airline region
+    if (Array.isArray(post.entities)) {
+        for (const entity of post.entities) {
+            if (airlinesMap[entity] !== undefined) {
+                return airlinesMap[entity];
+            }
+        }
+    }
+
+    // Priority 2: text-based regionSources keyword scan
+    const text = ((post.title || '') + ' ' + (post.body || '')).toLowerCase();
+    for (const [keyword, region] of Object.entries(config.regionSources || {})) {
+        if (text.includes(keyword.toLowerCase())) {
+            return region;
+        }
+    }
+
+    // Fallback
+    return 'global';
+}
+
+/**
+ * processPost(rawPost, config) — orchestrator that enriches a raw post with
+ * entities, autoCategories, region, manualCategories, sentiment, and fetchDate.
+ * Returns the enriched post object.
+ */
+function processPost(rawPost, config) {
+    rawPost.entities         = extractEntities(rawPost, config);
+    rawPost.autoCategories   = categorisePost(rawPost, config);
+    rawPost.region           = assignRegion(rawPost, config);
+    rawPost.manualCategories = null;
+    rawPost.sentiment        = 'negative'; // Default for complaints
+    rawPost.fetchDate        = new Date().toISOString();
+    return rawPost;
+}
+
 // ===== SSE BROADCAST =====
 function sendSSE(data) {
     const payload = 'data: ' + JSON.stringify(data) + '\n\n';
@@ -359,3 +481,64 @@ server.listen(PORT, () => {
     console.log('');
     console.log('Press Ctrl+C to stop.');
 });
+
+// ===== CATEGORISATION TEST BLOCK =====
+if (process.argv.includes('--test-categorise')) {
+    const config = loadCategories();
+
+    const samplePost = {
+        title: 'Third PW1100G engine failure on IndiGo A320neo',
+        body:  'Pratt & Whitney needs to address the reliability issues with the geared turbofan. Multiple AOG situations reported.'
+    };
+
+    const enriched = processPost(samplePost, config);
+
+    console.log('');
+    console.log('===== CATEGORISATION TEST =====');
+    console.log('Post:');
+    console.log('  Title:', enriched.title);
+    console.log('  Body: ', enriched.body);
+    console.log('');
+    console.log('Results:');
+    console.log('  autoCategories:  ', JSON.stringify(enriched.autoCategories));
+    console.log('  entities:        ', JSON.stringify(enriched.entities));
+    console.log('  region:          ', enriched.region);
+    console.log('  manualCategories:', enriched.manualCategories);
+    console.log('  sentiment:       ', enriched.sentiment);
+    console.log('  fetchDate:       ', enriched.fetchDate);
+    console.log('');
+
+    // Validate expected outcomes
+    // Note: mro_maintenance scores 10 (AOG only) which is below the threshold of 15,
+    // so only engine_manufacturer fires on this post.
+    const expectCategories = ['engine_manufacturer'];
+    const expectEntities   = ['Pratt & Whitney', 'IndiGo', 'A320neo'];
+    const expectRegion     = 'apac';
+
+    let pass = true;
+
+    for (const cat of expectCategories) {
+        if (!enriched.autoCategories.includes(cat)) {
+            console.log('FAIL: expected autoCategory "' + cat + '" not found');
+            pass = false;
+        }
+    }
+
+    for (const ent of expectEntities) {
+        if (!enriched.entities.includes(ent)) {
+            console.log('FAIL: expected entity "' + ent + '" not found');
+            pass = false;
+        }
+    }
+
+    if (enriched.region !== expectRegion) {
+        console.log('FAIL: expected region "' + expectRegion + '", got "' + enriched.region + '"');
+        pass = false;
+    }
+
+    if (pass) {
+        console.log('All validation checks PASSED.');
+    }
+
+    process.exit(0);
+}
