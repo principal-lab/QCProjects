@@ -1,0 +1,365 @@
+{
+  "sources": {
+    "reddit": {
+      "enabled": true,
+      "type": "reddit",
+      "label": "Reddit",
+      "description": "Aviation-related subreddits for passenger and industry commentary",
+      "subreddits": [
+        "aviation",
+        "flyers",
+        "airlines",
+        "travel",
+        "aviationmaintenance",
+        "flying",
+        "airplanes",
+        "flightattendants"
+      ],
+      "keywords": [
+        "complaint",
+        "delay",
+        "cancellation",
+        "safety",
+        "engine",
+        "Boeing",
+        "Airbus",
+        "maintenance",
+        "FAA",
+        "EASA",
+        "grounding",
+        "recall",
+        "defect",
+        "incident",
+        "accident"
+      ],
+      "maxPostsPerFetch": 25,
+      "rateLimitMs": 2000,
+      "sortBy": "new",
+      "timeframe": "day"
+    },
+    "rss": {
+      "enabled": true,
+      "type": "rss",
+      "label": "RSS News Feeds",
+      "description": "Aviation industry news and incident reporting feeds",
+      "feeds": [
+        {
+          "url": "https://www.aviationweek.com/rss.xml",
+          "label": "Aviation Week",
+          "region": "global"
+        },
+        {
+          "url": "https://simpleflying.com/feed/",
+          "label": "Simple Flying",
+          "region": "global"
+        },
+        {
+          "url": "https://aviationherald.com/rss.xml",
+          "label": "Aviation Herald",
+          "region": "global"
+        },
+        {
+          "url": "https://www.flightglobal.com/rss",
+          "label": "Flight Global",
+          "region": "global"
+        },
+        {
+          "url": "https://www.ch-aviation.com/portal/news/rss",
+          "label": "CH-Aviation",
+          "region": "global"
+        },
+        {
+          "url": "https://airwaysmag.com/feed/",
+          "label": "Airways Magazine",
+          "region": "global"
+        },
+        {
+          "url": "https://thepointsguy.com/feed/",
+          "label": "The Points Guy",
+          "region": "global"
+        },
+        {
+          "url": "https://www.australianaviation.com.au/feed/",
+          "label": "Australian Aviation",
+          "region": "apac"
+        }
+      ],
+      "keywords": [
+        "complaint",
+        "safety",
+        "incident",
+        "grounding",
+        "defect",
+        "airworthiness",
+        "delay",
+        "cancellation",
+        "passenger",
+        "maintenance",
+        "FAA",
+        "EASA",
+        "CASA"
+      ],
+      "maxPostsPerFetch": 20,
+      "rateLimitMs": 1000
+    },
+    "faa_sdr": {
+      "enabled": true,
+      "type": "api",
+      "label": "FAA Service Difficulty Reports",
+      "description": "FAA Service Difficulty Reporting (SDR) system for aircraft component failures and defects",
+      "baseUrl": "https://av-info.faa.gov/sdrx/",
+      "endpoints": {
+        "search": "https://av-info.faa.gov/sdrx/search",
+        "detail": "https://av-info.faa.gov/sdrx/detail"
+      },
+      "keywords": [
+        "failure",
+        "defect",
+        "malfunction",
+        "crack",
+        "corrosion",
+        "delamination",
+        "fatigue",
+        "leakage"
+      ],
+      "maxPostsPerFetch": 50,
+      "rateLimitMs": 3000,
+      "region": "americas",
+      "authority": "FAA"
+    },
+    "easa": {
+      "enabled": true,
+      "type": "api",
+      "label": "EASA Airworthiness Directives",
+      "description": "European Union Aviation Safety Agency (EASA) airworthiness directives and safety publications",
+      "baseUrl": "https://ad.easa.europa.eu/",
+      "endpoints": {
+        "adList": "https://ad.easa.europa.eu/api/ADs",
+        "safetyInfo": "https://ad.easa.europa.eu/api/SIBs"
+      },
+      "keywords": [
+        "airworthiness directive",
+        "AD",
+        "mandatory",
+        "unsafe condition",
+        "corrective action",
+        "compliance"
+      ],
+      "maxPostsPerFetch": 30,
+      "rateLimitMs": 2000,
+      "region": "emea",
+      "authority": "EASA"
+    },
+    "asrs": {
+      "enabled": true,
+      "type": "api",
+      "label": "NASA ASRS",
+      "description": "NASA Aviation Safety Reporting System (ASRS) — anonymous safety reports from pilots, crew, and controllers",
+      "baseUrl": "https://asrs.arc.nasa.gov/",
+      "endpoints": {
+        "search": "https://asrs.arc.nasa.gov/search/database.html"
+      },
+      "keywords": [
+        "near miss",
+        "ATC",
+        "TCAS",
+        "incursion",
+        "crew resource management",
+        "fatigue",
+        "communication",
+        "weather",
+        "equipment malfunction"
+      ],
+      "maxPostsPerFetch": 25,
+      "rateLimitMs": 2000,
+      "region": "americas",
+      "authority": "NASA"
+    },
+    "twitter": {
+      "enabled": false,
+      "type": "twitter",
+      "label": "X (Twitter)",
+      "description": "Social media monitoring for aviation-related posts and complaints on X (formerly Twitter)",
+      "searchQueries": [
+        "#aviationsafety",
+        "#boeingcrisis",
+        "#airbus quality",
+        "airline complaint",
+        "flight delayed",
+        "flight cancelled",
+        "#737MAX",
+        "aviation incident",
+        "@FAANews complaint",
+        "airline safety concern"
+      ],
+      "keywords": [
+        "aviation",
+        "airline",
+        "flight",
+        "Boeing",
+        "Airbus",
+        "FAA",
+        "EASA",
+        "safety",
+        "delay",
+        "cancel"
+      ],
+      "maxPostsPerFetch": 50,
+      "rateLimitMs": 5000,
+      "note": "Requires Twitter API Bearer Token in keys.json"
+    },
+    "skytrax": {
+      "enabled": true,
+      "type": "scraper",
+      "label": "Skytrax Airline Reviews",
+      "description": "Skytrax passenger airline reviews and ratings",
+      "baseUrl": "https://www.airlinequality.com",
+      "endpoints": {
+        "reviews": "https://www.airlinequality.com/airline-reviews/"
+      },
+      "keywords": [
+        "safety",
+        "incident",
+        "broken",
+        "faulty",
+        "complaint",
+        "unacceptable",
+        "dangerous",
+        "refused",
+        "stranded",
+        "poor maintenance"
+      ],
+      "maxPostsPerFetch": 20,
+      "rateLimitMs": 3000,
+      "minRating": 1,
+      "maxRating": 3
+    },
+    "tripadvisor": {
+      "enabled": false,
+      "type": "scraper",
+      "label": "TripAdvisor Airline Reviews",
+      "description": "TripAdvisor passenger reviews for airlines",
+      "baseUrl": "https://www.tripadvisor.com",
+      "keywords": [
+        "safety",
+        "complaint",
+        "dangerous",
+        "broken",
+        "faulty",
+        "stranded",
+        "delayed",
+        "cancelled",
+        "poor service",
+        "mechanical"
+      ],
+      "maxPostsPerFetch": 15,
+      "rateLimitMs": 5000,
+      "note": "Scraping may be subject to ToS restrictions — review before enabling"
+    },
+    "pprune": {
+      "enabled": true,
+      "type": "scraper",
+      "label": "PPRuNe Forums",
+      "description": "Professional Pilots Rumour Network (PPRuNe) — industry forums for aviation professionals",
+      "baseUrl": "https://www.pprune.org",
+      "forums": [
+        {
+          "url": "https://www.pprune.org/accidents-close-calls/",
+          "label": "Accidents and Close Calls"
+        },
+        {
+          "url": "https://www.pprune.org/rumours-news/",
+          "label": "Rumours and News"
+        },
+        {
+          "url": "https://www.pprune.org/tech-log/",
+          "label": "Tech Log"
+        },
+        {
+          "url": "https://www.pprune.org/maintenance-base/",
+          "label": "Maintenance Base"
+        }
+      ],
+      "keywords": [
+        "safety",
+        "incident",
+        "defect",
+        "maintenance",
+        "AOG",
+        "grounding",
+        "failure",
+        "Boeing",
+        "Airbus",
+        "FAA",
+        "EASA",
+        "CASA"
+      ],
+      "maxPostsPerFetch": 20,
+      "rateLimitMs": 4000
+    },
+    "airlinersnet": {
+      "enabled": true,
+      "type": "scraper",
+      "label": "Airliners.net Forums",
+      "description": "Airliners.net aviation community forums covering accidents, incidents, and industry news",
+      "baseUrl": "https://www.airliners.net",
+      "forums": [
+        {
+          "url": "https://www.airliners.net/forum/viewforum.php?f=3",
+          "label": "Aviation Safety"
+        },
+        {
+          "url": "https://www.airliners.net/forum/viewforum.php?f=2",
+          "label": "Aviation Incidents and Accidents"
+        }
+      ],
+      "keywords": [
+        "safety",
+        "incident",
+        "accident",
+        "grounding",
+        "defect",
+        "failure",
+        "Boeing",
+        "Airbus",
+        "complaint",
+        "maintenance"
+      ],
+      "maxPostsPerFetch": 15,
+      "rateLimitMs": 4000
+    },
+    "youtube": {
+      "enabled": false,
+      "type": "youtube",
+      "label": "YouTube",
+      "description": "YouTube video monitoring for aviation incident reports, news, and commentary",
+      "searchQueries": [
+        "aviation incident 2025",
+        "airline safety complaint",
+        "Boeing defect",
+        "Airbus safety",
+        "FAA investigation",
+        "EASA airworthiness",
+        "aircraft maintenance failure",
+        "aviation news today"
+      ],
+      "keywords": [
+        "aviation",
+        "airline",
+        "incident",
+        "accident",
+        "Boeing",
+        "Airbus",
+        "safety",
+        "FAA",
+        "EASA",
+        "complaint",
+        "defect",
+        "grounding"
+      ],
+      "maxPostsPerFetch": 10,
+      "rateLimitMs": 1000,
+      "note": "Requires YouTube Data API key in keys.json"
+    }
+  }
+}

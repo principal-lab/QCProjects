@@ -1,0 +1,13 @@
+{
+  "reddit": {
+    "clientId": "",
+    "clientSecret": "",
+    "userAgent": "QC-Aviation-Complaints/1.0"
+  },
+  "twitter": {
+    "bearerToken": ""
+  },
+  "youtube": {
+    "apiKey": ""
+  }
+}
