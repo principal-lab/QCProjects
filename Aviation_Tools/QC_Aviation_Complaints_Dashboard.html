@@ -1456,18 +1456,17 @@
             document.getElementById('progressList').innerHTML = '';
             document.getElementById('progressSummary').style.display = 'none';
 
-            // Start update
-            try {
-                await fetch('/api/update', { method: 'POST' });
-            } catch (err) {
-                console.error('Update trigger error:', err);
-            }
-
-            // Connect SSE
+            // Connect SSE FIRST so we don't miss any progress events
             const sse = new EventSource('/api/update-status');
+
             sse.onmessage = (event) => {
                 const data = JSON.parse(event.data);
-                if (data.type === 'progress') {
+                if (data.type === 'connected') {
+                    // SSE channel open — now trigger the update
+                    fetch('/api/update', { method: 'POST' }).catch(err => {
+                        console.error('Update trigger error:', err);
+                    });
+                } else if (data.type === 'progress') {
                     updateProgressUI(data);
                 } else if (data.type === 'complete') {
                     sse.close();

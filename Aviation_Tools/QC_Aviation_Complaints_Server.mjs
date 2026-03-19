@@ -592,12 +592,8 @@ async function fetchSkytrax(sourceConfig) {
     // If no airlines list configured, attempt to use a small default set of
     // commonly reviewed carriers so the fetcher is functional out-of-box.
     const targets = airlines.length > 0 ? airlines : [
-        'qantas-airways',
-        'singapore-airlines',
-        'emirates',
         'ryanair',
-        'united-airlines',
-        'american-airlines',
+        'emirates',
         'british-airways'
     ];
 
@@ -941,7 +937,9 @@ async function runUpdate() {
     updateInProgress = true;
 
     try {
-        const sourcesConfig = readJSON(SOURCES_FILE);
+        const sourcesRaw = readJSON(SOURCES_FILE);
+        // Unwrap the "sources" wrapper if present
+        const sourcesConfig = sourcesRaw.sources || sourcesRaw;
         const keys = readJSON(KEYS_FILE);
         const config = loadCategories();
         const archive = readJSON(DATA_FILE);
@@ -961,9 +959,14 @@ async function runUpdate() {
             try {
                 const fetcher = SOURCE_FETCHERS[sourceKey];
                 // Fetchers that need keys get them as second arg
-                const rawPosts = ['reddit', 'twitter', 'youtube'].includes(sourceKey)
-                    ? await fetcher(sourceConfig, keys)
-                    : await fetcher(sourceConfig);
+                const fetchPromise = ['reddit', 'twitter', 'youtube'].includes(sourceKey)
+                    ? fetcher(sourceConfig, keys)
+                    : fetcher(sourceConfig);
+                // Per-source timeout: 30 seconds max
+                const rawPosts = await Promise.race([
+                    fetchPromise,
+                    new Promise((_, reject) => setTimeout(() => reject(new Error('Source timeout (30s)')), 30000))
+                ]);
 
                 let newForSource = 0;
                 const existingIds = new Set(archive.posts.map(p => p.id));
