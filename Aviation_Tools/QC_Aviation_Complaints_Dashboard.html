@@ -763,6 +763,46 @@
                 font-size: 15px;
             }
         }
+
+        .recategorise-popup {
+            position: absolute;
+            background: #111827;
+            border: 1px solid #2a3a4a;
+            border-radius: 4px;
+            padding: 8px;
+            z-index: 300;
+            min-width: 180px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+        }
+        .recategorise-popup label {
+            display: block;
+            padding: 4px 0;
+            font-size: 12px;
+            color: #e0e0e0;
+            cursor: pointer;
+        }
+        .recategorise-popup label:hover {
+            color: #ffffff;
+        }
+        .recategorise-popup input[type="checkbox"] {
+            margin-right: 6px;
+        }
+        .recategorise-popup .recat-save-btn {
+            display: block;
+            width: 100%;
+            margin-top: 6px;
+            padding: 4px 8px;
+            background: #4fc3f7;
+            color: #000;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        .recategorise-popup .recat-save-btn:hover {
+            background: #29b6f6;
+        }
     </style>
 </head>
 <body>
@@ -970,9 +1010,556 @@
     </div>
 
     <script>
-        // JavaScript will be added in Tasks 8 and 9
-        // Placeholder to prevent errors
-        console.log('QC Aviation Complaints Intelligence Dashboard v1.0');
+    console.log('QC Aviation Complaints Intelligence Dashboard v1.0');
+
+    /* =========================================================
+       1. Category colour map, labels, source icons & state
+       ========================================================= */
+    const CATEGORY_COLOURS = {
+        technology: '#2196f3',
+        airframe_manufacturer: '#ff9800',
+        engine_manufacturer: '#f44336',
+        airline_operations: '#4caf50',
+        regulatory: '#9c27b0',
+        mro_maintenance: '#d4a843',
+        uncategorised: '#666666'
+    };
+
+    const CATEGORY_LABELS = {
+        technology: 'Technology',
+        airframe_manufacturer: 'Airframe Mfr',
+        engine_manufacturer: 'Engine Mfr',
+        airline_operations: 'Airline Ops',
+        regulatory: 'Regulatory',
+        mro_maintenance: 'MRO',
+        uncategorised: 'Uncategorised'
+    };
+
+    const SOURCE_ICONS = {
+        reddit: '&#9678;', rss: '&#9673;', easa: '&#9670;', skytrax: '&#9733;',
+        pprune: '&#9654;', youtube: '&#9658;', twitter: '&#10006;', manual: '&#9998;',
+        faa_sdr: '&#9679;'
+    };
+
+    const STATE = {
+        filters: { regions: [], categories: [], sources: [], dateFrom: '', dateTo: '', search: '' },
+        summary: null,
+        complaints: [],
+        page: 1,
+        limit: 50,
+        totalComplaints: 0,
+        days: 30,
+        trendChartInstance: null,
+        categoryChartInstance: null
+    };
+
+    /* =========================================================
+       2. API helper
+       ========================================================= */
+    async function api(endpoint, options = {}) {
+        const res = await fetch(endpoint, options);
+        if (!res.ok) throw new Error(`API error: ${res.status}`);
+        return res.json();
+    }
+
+    /* =========================================================
+       3. Build query string from STATE.filters
+       ========================================================= */
+    function buildQueryString() {
+        const p = new URLSearchParams();
+        if (STATE.filters.regions.length) p.set('region', STATE.filters.regions.join(','));
+        if (STATE.filters.categories.length) p.set('category', STATE.filters.categories.join(','));
+        if (STATE.filters.sources.length) p.set('source', STATE.filters.sources.join(','));
+        if (STATE.filters.dateFrom) p.set('dateFrom', STATE.filters.dateFrom);
+        if (STATE.filters.dateTo) p.set('dateTo', STATE.filters.dateTo);
+        if (STATE.filters.search) p.set('search', STATE.filters.search);
+        return p.toString();
+    }
+
+    /* =========================================================
+       4. Load summary data
+       ========================================================= */
+    async function loadSummary() {
+        const qs = buildQueryString();
+        const extra = qs ? '&' + qs : '';
+        STATE.summary = await api(`/api/summary?days=${STATE.days}${extra}`);
+        renderKPIs();
+        renderRegionStrip();
+        // Charts will be rendered by Task 9 functions
+        if (typeof renderTrendChart === 'function') renderTrendChart();
+        if (typeof renderCategoryChart === 'function') renderCategoryChart();
+        if (typeof renderHeatmap === 'function') renderHeatmap();
+        if (typeof renderClusters === 'function') renderClusters();
+    }
+
+    /* =========================================================
+       5. Load complaints / feed data
+       ========================================================= */
+    async function loadComplaints(append = false) {
+        if (!append) STATE.page = 1;
+        const qs = buildQueryString();
+        const extra = qs ? '&' + qs : '';
+        const data = await api(`/api/complaints?page=${STATE.page}&limit=${STATE.limit}${extra}`);
+        if (append) {
+            STATE.complaints.push(...data.posts);
+        } else {
+            STATE.complaints = data.posts;
+        }
+        STATE.totalComplaints = data.total;
+        renderFeed();
+        // Show/hide load more button
+        document.getElementById('btnLoadMore').style.display =
+            STATE.complaints.length < STATE.totalComplaints ? 'block' : 'none';
+    }
+
+    /* =========================================================
+       6. Relative time helper
+       ========================================================= */
+    function timeAgo(dateString) {
+        if (!dateString) return '';
+        const now = Date.now();
+        const then = new Date(dateString).getTime();
+        const diffMs = now - then;
+        const diffSec = Math.floor(diffMs / 1000);
+        const diffMin = Math.floor(diffSec / 60);
+        const diffHr = Math.floor(diffMin / 60);
+        const diffDay = Math.floor(diffHr / 24);
+        const diffWeek = Math.floor(diffDay / 7);
+        const diffMonth = Math.floor(diffDay / 30);
+
+        if (diffMin < 1) return 'just now';
+        if (diffMin < 60) return diffMin + 'm ago';
+        if (diffHr < 24) return diffHr + 'h ago';
+        if (diffDay < 14) return diffDay + 'd ago';
+        if (diffWeek < 9) return diffWeek + 'w ago';
+        return diffMonth + 'mo ago';
+    }
+
+    /* =========================================================
+       7. Render KPI cards
+       ========================================================= */
+    function renderKPIs() {
+        if (!STATE.summary) return;
+        const s = STATE.summary;
+
+        document.getElementById('kpiTotal').textContent = s.totalPosts ?? 0;
+
+        const newCount = s.newSinceLastUpdate ?? 0;
+        document.getElementById('kpiNew').textContent = newCount > 0 ? '+' + newCount : newCount;
+
+        const clusters = s.clusters || [];
+        document.getElementById('kpiTrending').textContent = clusters.length;
+        document.getElementById('kpiOpps').textContent = clusters.filter(c => c.isOpportunity).length;
+
+        // Last update timestamp
+        const luEl = document.getElementById('lastUpdate');
+        if (luEl) {
+            if (s.lastUpdate) {
+                const d = new Date(s.lastUpdate);
+                const months = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+                const dd = String(d.getDate()).padStart(2, '0');
+                const mmm = months[d.getMonth()];
+                const yyyy = d.getFullYear();
+                const hh = String(d.getHours()).padStart(2, '0');
+                const mm = String(d.getMinutes()).padStart(2, '0');
+                luEl.textContent = `${dd}${mmm}${yyyy} ${hh}:${mm}`;
+            } else {
+                luEl.textContent = 'Never';
+            }
+        }
+    }
+
+    /* =========================================================
+       8. Render feed list
+       ========================================================= */
+    function truncate(str, len) {
+        if (!str) return '';
+        return str.length > len ? str.substring(0, len) + '...' : str;
+    }
+
+    function renderFeed() {
+        const container = document.getElementById('feedList');
+        if (!STATE.complaints || STATE.complaints.length === 0) {
+            container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📋</div>' +
+                '<div class="empty-state-text">No complaints found matching your filters.</div>' +
+                '<div class="empty-state-sub">Try adjusting your filter criteria or click Update to fetch new data.</div></div>';
+            return;
+        }
+
+        container.innerHTML = STATE.complaints.map(post => {
+            const cats = post.manualCategories || post.autoCategories || [];
+            const tagsHtml = cats.map(cat =>
+                `<span class="category-tag" style="background:${CATEGORY_COLOURS[cat] || CATEGORY_COLOURS.uncategorised}20;color:${CATEGORY_COLOURS[cat] || CATEGORY_COLOURS.uncategorised}" ` +
+                `onclick="event.stopPropagation(); showRecategorise('${post.id}', this)">${CATEGORY_LABELS[cat] || cat}</span>`
+            ).join('');
+
+            const entitiesHtml = post.entities && post.entities.length
+                ? '<div class="feed-entities">Entities: ' + post.entities.join(', ') + '</div>' : '';
+            const linkHtml = post.url
+                ? `<a href="${post.url}" target="_blank" class="feed-link" onclick="event.stopPropagation()">View Original \u2192</a>` : '';
+
+            return `<div class="feed-item" data-id="${post.id}" onclick="toggleFeedItem(this)">
+                <div class="feed-source">
+                    <span class="source-icon">${SOURCE_ICONS[post.source] || '&#9679;'}</span>
+                    ${post.sourceDetail || post.source || 'Unknown'} &middot; ${timeAgo(post.date)}
+                </div>
+                <div class="feed-title">${truncate(post.title, 100)}</div>
+                <div class="feed-tags">${tagsHtml}</div>
+                <div class="feed-body">
+                    <p>${post.body || 'No content available'}</p>
+                    ${entitiesHtml}
+                    ${linkHtml}
+                </div>
+            </div>`;
+        }).join('');
+    }
+
+    /* =========================================================
+       9. Toggle feed item expansion
+       ========================================================= */
+    function toggleFeedItem(el) {
+        el.classList.toggle('expanded');
+    }
+
+    /* =========================================================
+       10. Recategorise dropdown
+       ========================================================= */
+    function showRecategorise(postId, tagEl) {
+        // Remove any existing popup
+        const existing = document.querySelector('.recategorise-popup');
+        if (existing) existing.remove();
+
+        const rect = tagEl.getBoundingClientRect();
+        const popup = document.createElement('div');
+        popup.className = 'recategorise-popup';
+        popup.style.top = (rect.bottom + window.scrollY + 4) + 'px';
+        popup.style.left = (rect.left + window.scrollX) + 'px';
+        popup.style.position = 'absolute';
+
+        const catKeys = Object.keys(CATEGORY_LABELS).filter(k => k !== 'uncategorised');
+        popup.innerHTML = catKeys.map(key =>
+            `<label><input type="checkbox" value="${key}"> ${CATEGORY_LABELS[key]}</label>`
+        ).join('') + '<button class="recat-save-btn" type="button">Save</button>';
+
+        document.body.appendChild(popup);
+
+        // Pre-check current categories
+        const feedItem = tagEl.closest('.feed-item');
+        const pid = feedItem ? feedItem.dataset.id : postId;
+        const post = STATE.complaints.find(c => c.id === pid);
+        if (post) {
+            const current = post.manualCategories || post.autoCategories || [];
+            popup.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+                if (current.includes(cb.value)) cb.checked = true;
+            });
+        }
+
+        // Save handler
+        popup.querySelector('.recat-save-btn').addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const selected = [...popup.querySelectorAll('input[type="checkbox"]:checked')].map(c => c.value);
+            try {
+                await api('/api/recategorise', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ postId: pid, categories: selected })
+                });
+                popup.remove();
+                await loadComplaints();
+                await loadSummary();
+            } catch (err) {
+                console.error('Recategorise error:', err);
+            }
+        });
+
+        // Close on outside click (next tick to avoid immediate close)
+        setTimeout(() => {
+            const closeHandler = (e) => {
+                if (!popup.contains(e.target)) {
+                    popup.remove();
+                    document.removeEventListener('click', closeHandler);
+                }
+            };
+            document.addEventListener('click', closeHandler);
+        }, 0);
+    }
+
+    /* =========================================================
+       11. Render region strip counts
+       ========================================================= */
+    function renderRegionStrip() {
+        if (!STATE.summary) return;
+        const rc = STATE.summary.regionCounts || {};
+        document.getElementById('rcApac').textContent = rc.apac || 0;
+        document.getElementById('rcEmea').textContent = rc.emea || 0;
+        document.getElementById('rcAmericas').textContent = rc.americas || 0;
+        document.getElementById('rcMiddleEast').textContent = rc.middle_east || 0;
+        document.getElementById('rcAfrica').textContent = rc.africa || 0;
+    }
+
+    /* =========================================================
+       12. Filter dropdown handlers
+       ========================================================= */
+    function updateFiltersFromDropdowns() {
+        // Regions
+        STATE.filters.regions = [...document.querySelectorAll('.filter-menu input[data-filter="region"]:checked')]
+            .map(cb => cb.value);
+        // Categories
+        STATE.filters.categories = [...document.querySelectorAll('.filter-menu input[data-filter="category"]:checked')]
+            .map(cb => cb.value);
+        // Sources
+        STATE.filters.sources = [...document.querySelectorAll('.filter-menu input[data-filter="source"]:checked')]
+            .map(cb => cb.value);
+
+        // Update filter count badges
+        document.querySelectorAll('.filter-dropdown').forEach(dd => {
+            const checkedCount = dd.querySelectorAll('.filter-menu input[type="checkbox"]:checked').length;
+            let badge = dd.querySelector('.filter-count');
+            if (checkedCount > 0) {
+                if (!badge) {
+                    badge = document.createElement('span');
+                    badge.className = 'filter-count';
+                    dd.querySelector('.filter-btn').appendChild(badge);
+                }
+                badge.textContent = checkedCount;
+            } else if (badge) {
+                badge.remove();
+            }
+        });
+    }
+
+    document.querySelectorAll('.filter-dropdown').forEach(dd => {
+        const btn = dd.querySelector('.filter-btn');
+        const menu = dd.querySelector('.filter-menu');
+        if (!btn || !menu) return;
+
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            // Close all other menus first
+            document.querySelectorAll('.filter-menu').forEach(m => {
+                if (m !== menu) m.style.display = 'none';
+            });
+            menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+        });
+
+        menu.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+            cb.addEventListener('change', () => {
+                updateFiltersFromDropdowns();
+                loadComplaints();
+                loadSummary();
+            });
+        });
+    });
+
+    // Close menus on outside click
+    document.addEventListener('click', () => {
+        document.querySelectorAll('.filter-menu').forEach(m => m.style.display = 'none');
+    });
+
+    /* =========================================================
+       13. Date filter handlers
+       ========================================================= */
+    const dateFromEl = document.getElementById('dateFrom');
+    const dateToEl = document.getElementById('dateTo');
+    if (dateFromEl) {
+        dateFromEl.addEventListener('change', () => {
+            STATE.filters.dateFrom = dateFromEl.value;
+            loadComplaints();
+            loadSummary();
+        });
+    }
+    if (dateToEl) {
+        dateToEl.addEventListener('change', () => {
+            STATE.filters.dateTo = dateToEl.value;
+            loadComplaints();
+            loadSummary();
+        });
+    }
+
+    /* =========================================================
+       14. Feed search handler (debounced)
+       ========================================================= */
+    let searchTimer;
+    const feedSearchEl = document.getElementById('feedSearch');
+    if (feedSearchEl) {
+        feedSearchEl.addEventListener('input', (e) => {
+            clearTimeout(searchTimer);
+            searchTimer = setTimeout(() => {
+                STATE.filters.search = e.target.value;
+                loadComplaints();
+            }, 300);
+        });
+    }
+
+    /* =========================================================
+       15. Region strip click handler
+       ========================================================= */
+    document.querySelectorAll('.region-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            btn.classList.toggle('active');
+            // Collect active regions
+            STATE.filters.regions = [...document.querySelectorAll('.region-btn.active')]
+                .map(b => b.dataset.region)
+                .filter(Boolean);
+
+            // Sync with filter dropdown checkboxes
+            document.querySelectorAll('.filter-menu input[data-filter="region"]').forEach(cb => {
+                cb.checked = STATE.filters.regions.includes(cb.value);
+            });
+            updateFiltersFromDropdowns();
+            loadComplaints();
+            loadSummary();
+        });
+    });
+
+    /* =========================================================
+       16. Load More button
+       ========================================================= */
+    const btnLoadMore = document.getElementById('btnLoadMore');
+    if (btnLoadMore) {
+        btnLoadMore.addEventListener('click', () => {
+            STATE.page++;
+            loadComplaints(true);
+        });
+    }
+
+    /* =========================================================
+       17. Update button & progress overlay
+       ========================================================= */
+    function updateProgressUI(data) {
+        const list = document.getElementById('progressList');
+        if (!list) return;
+        let item = list.querySelector(`[data-source="${data.source}"]`);
+        if (!item) {
+            item = document.createElement('div');
+            item.className = 'progress-item';
+            item.dataset.source = data.source;
+            list.appendChild(item);
+        }
+        const statusClass = data.status === 'done' ? 'done' : data.status === 'error' ? 'error' : 'running';
+        item.innerHTML = `<span class="progress-source">${data.source}</span>` +
+            `<span class="progress-status ${statusClass}">${data.message || data.status}</span>`;
+    }
+
+    function showProgressComplete(data) {
+        const summary = document.getElementById('progressSummary');
+        if (!summary) return;
+        const total = data.totalNew || 0;
+        summary.textContent = `Update complete. ${total} new complaint${total !== 1 ? 's' : ''} added.`;
+        summary.style.display = 'block';
+    }
+
+    const btnUpdate = document.getElementById('btnUpdate');
+    if (btnUpdate) {
+        btnUpdate.addEventListener('click', async () => {
+            document.getElementById('progressOverlay').style.display = 'flex';
+            document.getElementById('progressList').innerHTML = '';
+            document.getElementById('progressSummary').style.display = 'none';
+
+            // Start update
+            try {
+                await fetch('/api/update', { method: 'POST' });
+            } catch (err) {
+                console.error('Update trigger error:', err);
+            }
+
+            // Connect SSE
+            const sse = new EventSource('/api/update-status');
+            sse.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                if (data.type === 'progress') {
+                    updateProgressUI(data);
+                } else if (data.type === 'complete') {
+                    sse.close();
+                    showProgressComplete(data);
+                    setTimeout(() => {
+                        document.getElementById('progressOverlay').style.display = 'none';
+                        loadSummary();
+                        loadComplaints();
+                    }, 2000);
+                } else if (data.type === 'error') {
+                    sse.close();
+                    document.getElementById('progressSummary').textContent = 'Error: ' + data.message;
+                    document.getElementById('progressSummary').style.display = 'block';
+                }
+            };
+            sse.onerror = () => {
+                sse.close();
+                document.getElementById('progressSummary').textContent = 'Connection lost during update.';
+                document.getElementById('progressSummary').style.display = 'block';
+            };
+        });
+    }
+
+    /* =========================================================
+       18. Manual Add modal
+       ========================================================= */
+    const btnManualAdd = document.getElementById('btnManualAdd');
+    if (btnManualAdd) {
+        btnManualAdd.addEventListener('click', () => {
+            document.getElementById('manualAddModal').style.display = 'flex';
+        });
+    }
+
+    const modalClose = document.getElementById('modalClose');
+    if (modalClose) {
+        modalClose.addEventListener('click', () => {
+            document.getElementById('manualAddModal').style.display = 'none';
+        });
+    }
+
+    const manualAddModal = document.getElementById('manualAddModal');
+    if (manualAddModal) {
+        manualAddModal.addEventListener('click', (e) => {
+            if (e.target === e.currentTarget) e.currentTarget.style.display = 'none';
+        });
+    }
+
+    const manualAddForm = document.getElementById('manualAddForm');
+    if (manualAddForm) {
+        manualAddForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const cats = [...document.querySelectorAll('input[name="maCat"]:checked')].map(c => c.value);
+            try {
+                await api('/api/manual-add', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        source: document.getElementById('maSource').value || 'manual',
+                        title: document.getElementById('maTitle').value,
+                        body: document.getElementById('maBody').value,
+                        url: document.getElementById('maUrl').value,
+                        categories: cats,
+                        region: document.getElementById('maRegion').value
+                    })
+                });
+                document.getElementById('manualAddModal').style.display = 'none';
+                manualAddForm.reset();
+                loadComplaints();
+                loadSummary();
+            } catch (err) {
+                console.error('Manual add error:', err);
+            }
+        });
+    }
+
+    /* =========================================================
+       19. Initialisation
+       ========================================================= */
+    async function init() {
+        try {
+            await loadSummary();
+            await loadComplaints();
+        } catch (err) {
+            console.error('Init error:', err);
+        }
+    }
+    document.addEventListener('DOMContentLoaded', init);
+
+    /* =========================================================
+       Task 9: Chart rendering functions will be added below
+       ========================================================= */
+
     </script>
 </body>
 </html>
