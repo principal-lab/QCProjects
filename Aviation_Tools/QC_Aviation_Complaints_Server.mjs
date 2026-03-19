@@ -1061,6 +1061,204 @@ function serveFile(filePath, res) {
     });
 }
 
+// ===== EXPORT: PDF / DOCX GENERATION =====
+
+// POST /api/export-pdf
+// Receives: { filters, days, charts: { trends: base64, categories: base64 } }
+// Generates markdown report, converts via pandoc, returns DOCX
+
+async function handleExportPDF(req, res) {
+    try {
+        const body = await parseBody(req);
+        const { filters = {}, days = 30, charts = {} } = body;
+
+        // Load data
+        const archive = readJSON(DATA_FILE);
+        const config = loadCategories();
+
+        // Filter posts (same logic as /api/complaints)
+        let posts = [...archive.posts];
+        if (filters.region && filters.region.length) {
+            const regions = Array.isArray(filters.region) ? filters.region : filters.region.split(',');
+            posts = posts.filter(p => regions.includes(p.region) || p.region === 'global');
+        }
+        if (filters.category && filters.category.length) {
+            const cats = Array.isArray(filters.category) ? filters.category : filters.category.split(',');
+            posts = posts.filter(p => {
+                const pc = p.manualCategories || p.autoCategories || [];
+                return pc.some(c => cats.includes(c));
+            });
+        }
+        if (filters.dateFrom) posts = posts.filter(p => p.date >= filters.dateFrom);
+        if (filters.dateTo) posts = posts.filter(p => p.date <= filters.dateTo);
+
+        // Date formatting
+        const now = new Date();
+        const months = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+        const dateStr = String(now.getDate()).padStart(2,'0') + months[now.getMonth()] + now.getFullYear();
+
+        // Calculate summary stats for the report
+        const periodStart = new Date(now - days * 86400000);
+        const periodPosts = posts.filter(p => new Date(p.date) >= periodStart);
+
+        // Category counts
+        const catCounts = {};
+        const categories = ['technology', 'airframe_manufacturer', 'engine_manufacturer', 'airline_operations', 'regulatory', 'mro_maintenance'];
+        const catLabels = { technology: 'Technology', airframe_manufacturer: 'Airframe Manufacturer', engine_manufacturer: 'Engine Manufacturer', airline_operations: 'Airline Operations', regulatory: 'Regulatory / Compliance', mro_maintenance: 'MRO / Maintenance' };
+        categories.forEach(c => { catCounts[c] = periodPosts.filter(p => (p.manualCategories || p.autoCategories || []).includes(c)).length; });
+
+        // Top entities
+        const entityCounts = {};
+        periodPosts.forEach(p => (p.entities || []).forEach(e => { entityCounts[e] = (entityCounts[e] || 0) + 1; }));
+        const topEntities = Object.entries(entityCounts).sort((a,b) => b[1] - a[1]).slice(0, 10);
+
+        // Save chart images as temp files
+        const tmpDir = path.join(__dirname, '.tmp_export');
+        if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir);
+
+        const chartFiles = {};
+        for (const [key, base64] of Object.entries(charts)) {
+            if (!base64) continue;
+            const data = base64.replace(/^data:image\/png;base64,/, '');
+            const filePath = path.join(tmpDir, `${key}.png`);
+            fs.writeFileSync(filePath, Buffer.from(data, 'base64'));
+            chartFiles[key] = filePath;
+        }
+
+        // Generate markdown
+        let md = `---\ntitle: "Aviation Complaints Intelligence Report"\ndate: "${dateStr}"\n---\n\n`;
+        md += `# Aviation Complaints Intelligence Report\n\n`;
+        md += `**Report Date:** ${dateStr}\n\n`;
+        md += `**Period:** Last ${days} days (${periodPosts.length} complaints)\n\n`;
+        md += `**Total Archive:** ${archive.posts.length} complaints\n\n`;
+
+        md += `## Executive Summary\n\n`;
+        md += `This report analyses ${periodPosts.length} aviation industry complaints collected over the past ${days} days from multiple open-source intelligence channels.\n\n`;
+
+        if (topEntities.length > 0) {
+            md += `**Most discussed entities:**\n\n`;
+            topEntities.slice(0, 5).forEach(([entity, count]) => {
+                md += `- **${entity}** — ${count} mentions\n`;
+            });
+            md += '\n';
+        }
+
+        md += `## Acronyms\n\n`;
+        md += `| Acronym | Definition |\n|---------|------------|\n`;
+        md += `| AD | Airworthiness Directive |\n`;
+        md += `| AOG | Aircraft on Ground |\n`;
+        md += `| EASA | European Union Aviation Safety Agency |\n`;
+        md += `| FAA | Federal Aviation Administration |\n`;
+        md += `| MRO | Maintenance, Repair and Overhaul |\n`;
+        md += `| OEM | Original Equipment Manufacturer |\n`;
+        md += `| SDR | Service Difficulty Report |\n\n`;
+
+        // Embed trend chart if available
+        if (chartFiles.trends) {
+            md += `## Complaint Trends\n\n`;
+            md += `![Complaint Trends](${chartFiles.trends})\n\n`;
+        }
+
+        md += `## Category Analysis\n\n`;
+        categories.forEach(cat => {
+            if (catCounts[cat] > 0) {
+                md += `### ${catLabels[cat]}\n\n`;
+                md += `**${catCounts[cat]} complaints** in the past ${days} days.\n\n`;
+                // Include top 3 example posts
+                const examples = periodPosts.filter(p => (p.manualCategories || p.autoCategories || []).includes(cat)).slice(0, 3);
+                examples.forEach(p => {
+                    md += `> *"${(p.title || '').substring(0, 120)}"* — ${p.sourceDetail || p.source}\n\n`;
+                });
+            }
+        });
+
+        // Embed category chart
+        if (chartFiles.categories) {
+            md += `## Category Breakdown\n\n`;
+            md += `![Category Breakdown](${chartFiles.categories})\n\n`;
+        }
+
+        md += `## Manufacturer Analysis\n\n`;
+        if (topEntities.length > 0) {
+            md += `| Entity | Mentions | Primary Category |\n|--------|----------|------------------|\n`;
+            topEntities.forEach(([entity, count]) => {
+                // Find most common category for this entity
+                const entPosts = periodPosts.filter(p => (p.entities || []).includes(entity));
+                const entCats = {};
+                entPosts.forEach(p => (p.manualCategories || p.autoCategories || []).forEach(c => { entCats[c] = (entCats[c] || 0) + 1; }));
+                const topCat = Object.entries(entCats).sort((a,b) => b[1] - a[1])[0];
+                md += `| ${entity} | ${count} | ${topCat ? catLabels[topCat[0]] || topCat[0] : 'N/A'} |\n`;
+            });
+            md += '\n';
+        }
+
+        md += `## Regional Analysis\n\n`;
+        const regionLabels = { apac: 'Asia-Pacific', emea: 'Europe, Middle East & Africa', americas: 'Americas', middle_east: 'Middle East', africa: 'Africa', global: 'Global' };
+        const regionCounts = {};
+        periodPosts.forEach(p => { regionCounts[p.region] = (regionCounts[p.region] || 0) + 1; });
+        Object.entries(regionCounts).sort((a,b) => b[1] - a[1]).forEach(([region, count]) => {
+            md += `- **${regionLabels[region] || region}:** ${count} complaints\n`;
+        });
+        md += '\n';
+
+        md += `## Consulting Opportunities\n\n`;
+        // Entities with significant complaint volume
+        const opportunities = topEntities.filter(([_, count]) => count >= 5);
+        if (opportunities.length > 0) {
+            opportunities.forEach(([entity, count]) => {
+                md += `### ${entity} (${count} complaints)\n\n`;
+                const entPosts = periodPosts.filter(p => (p.entities || []).includes(entity)).slice(0, 2);
+                entPosts.forEach(p => {
+                    md += `> *"${(p.title || '').substring(0, 150)}"*\n\n`;
+                });
+            });
+        } else {
+            md += `No entities with sufficient complaint volume (5+) detected in this period.\n\n`;
+        }
+
+        md += `## References\n\nData sourced from: Reddit, aviation news RSS feeds, EASA Airworthiness Directives, Skytrax airline reviews, PPRuNe forums, YouTube comments, and manual entries.\n\n`;
+
+        // Write markdown to temp file
+        const mdFile = path.join(tmpDir, 'report.md');
+        fs.writeFileSync(mdFile, md, 'utf8');
+
+        // Try pandoc conversion
+        const refDoc = path.join(__dirname, '..', 'Document_Publishing_Tools', 'reference_arial.docx');
+        const outFile = path.join(tmpDir, 'report.docx');
+
+        const pandocCmd = fs.existsSync(refDoc)
+            ? `pandoc "${mdFile}" -o "${outFile}" --reference-doc="${refDoc}"`
+            : `pandoc "${mdFile}" -o "${outFile}"`;
+
+        await new Promise((resolve, reject) => {
+            exec(pandocCmd, (err, stdout, stderr) => {
+                if (err) reject(new Error('Pandoc failed: ' + (stderr || err.message)));
+                else resolve();
+            });
+        });
+
+        // Read and return DOCX
+        const docx = fs.readFileSync(outFile);
+        res.writeHead(200, {
+            'Content-Type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'Content-Disposition': `attachment; filename="QC_Aviation_Complaints_Report_${dateStr}.docx"`,
+            'Content-Length': docx.length
+        });
+        res.end(docx);
+
+        // Cleanup temp files
+        try {
+            fs.readdirSync(tmpDir).forEach(f => fs.unlinkSync(path.join(tmpDir, f)));
+            fs.rmdirSync(tmpDir);
+        } catch {}
+
+    } catch (err) {
+        console.error('Export PDF error:', err);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+    }
+}
+
 // ===== HTTP SERVER =====
 const server = http.createServer(async (req, res) => {
 
@@ -1427,10 +1625,9 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
-    // ---- POST /api/export-pdf — export to PDF (not yet implemented) ----
+    // ---- POST /api/export-pdf — generate DOCX report via pandoc ----
     if (req.method === 'POST' && url === '/api/export-pdf') {
-        res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
-        res.end(JSON.stringify({ status: 'not implemented' }));
+        await handleExportPDF(req, res);
         return;
     }
 

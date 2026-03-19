@@ -1741,6 +1741,129 @@
         });
     });
 
+    /* =========================================================
+       EXPORT: Chart PNGs
+       ========================================================= */
+
+    function exportCharts() {
+        // Export Chart.js canvases as PNGs
+        const charts = [
+            { instance: STATE.trendChartInstance, name: 'complaint_trends_' + STATE.days + 'd.png' },
+            { instance: STATE.categoryChartInstance, name: 'category_breakdown.png' }
+        ];
+
+        for (const { instance, name } of charts) {
+            if (!instance) continue;
+            const link = document.createElement('a');
+            link.href = instance.toBase64Image('image/png');
+            link.download = name;
+            link.click();
+        }
+
+        // Export heatmap as a simple screenshot (create temporary canvas)
+        exportHeatmapAsPNG();
+    }
+
+    function exportHeatmapAsPNG() {
+        const table = document.querySelector('#heatmapTable table');
+        if (!table) return;
+
+        // Create a canvas and manually draw the heatmap
+        const rows = table.querySelectorAll('tr');
+        const canvas = document.createElement('canvas');
+        const cellW = 80, cellH = 30, headerH = 35, nameW = 150;
+        canvas.width = nameW + 6 * cellW + 20;
+        canvas.height = headerH + rows.length * cellH + 20;
+        const ctx = canvas.getContext('2d');
+
+        // Background
+        ctx.fillStyle = '#111827';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // Draw headers
+        ctx.fillStyle = '#8fadc8';
+        ctx.font = '10px Arial';
+        ctx.textAlign = 'center';
+        const headers = ['Tech', 'Airframe', 'Engine', 'Airline', 'Regulatory', 'MRO'];
+        headers.forEach((h, i) => ctx.fillText(h, nameW + i * cellW + cellW / 2 + 10, 22));
+
+        // Draw rows
+        for (let r = 1; r < rows.length; r++) {
+            const cells = rows[r].querySelectorAll('td');
+            const y = headerH + (r - 1) * cellH;
+
+            // Manufacturer name
+            ctx.fillStyle = '#e0e0e0';
+            ctx.textAlign = 'left';
+            ctx.font = '11px Arial';
+            ctx.fillText(cells[0].textContent, 10, y + 20);
+
+            // Data cells
+            for (let c = 1; c < cells.length; c++) {
+                const v = parseInt(cells[c].textContent) || 0;
+                const bg = v === 0 ? '#111827' : v <= 5 ? '#1a2a1a' : v <= 15 ? '#2a2a1a' : '#2a1a1a';
+                ctx.fillStyle = bg;
+                ctx.fillRect(nameW + (c - 1) * cellW + 10, y + 4, cellW - 4, cellH - 4);
+                ctx.fillStyle = v === 0 ? '#555' : '#e0e0e0';
+                ctx.textAlign = 'center';
+                ctx.font = '11px Arial';
+                ctx.fillText(v.toString(), nameW + (c - 1) * cellW + cellW / 2 + 10, y + 22);
+            }
+        }
+
+        const link = document.createElement('a');
+        link.href = canvas.toDataURL('image/png');
+        link.download = 'manufacturer_heatmap.png';
+        link.click();
+    }
+
+    document.getElementById('btnExportCharts').addEventListener('click', exportCharts);
+
+    /* =========================================================
+       EXPORT: PDF / DOCX Report (via server)
+       ========================================================= */
+
+    async function exportPDF() {
+        // Collect chart images
+        const charts = {};
+        if (STATE.trendChartInstance) charts.trends = STATE.trendChartInstance.toBase64Image('image/png');
+        if (STATE.categoryChartInstance) charts.categories = STATE.categoryChartInstance.toBase64Image('image/png');
+
+        try {
+            const res = await fetch('/api/export-pdf', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    filters: STATE.filters,
+                    days: STATE.days,
+                    charts
+                })
+            });
+
+            if (!res.ok) {
+                const err = await res.json();
+                alert('Export failed: ' + (err.error || 'Unknown error'));
+                return;
+            }
+
+            // Download the DOCX file
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            const now = new Date();
+            const months = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+            const dateStr = String(now.getDate()).padStart(2,'0') + months[now.getMonth()] + now.getFullYear();
+            link.href = url;
+            link.download = `QC_Aviation_Complaints_Report_${dateStr}.docx`;
+            link.click();
+            URL.revokeObjectURL(url);
+        } catch (err) {
+            alert('Export failed: ' + err.message);
+        }
+    }
+
+    document.getElementById('btnExportPDF').addEventListener('click', exportPDF);
+
     </script>
 </body>
 </html>
