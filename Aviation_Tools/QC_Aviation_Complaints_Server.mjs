@@ -930,6 +930,104 @@ const SOURCE_FETCHERS = {
     faa_sdr: fetchFAASDR
 };
 
+// ===== UPDATE ORCHESTRATOR =====
+let updateInProgress = false;
+
+async function runUpdate() {
+    if (updateInProgress) {
+        sendSSE({ type: 'error', message: 'Update already in progress' });
+        return;
+    }
+    updateInProgress = true;
+
+    try {
+        const sourcesConfig = readJSON(SOURCES_FILE);
+        const keys = readJSON(KEYS_FILE);
+        const config = loadCategories();
+        const archive = readJSON(DATA_FILE);
+
+        // Get enabled sources that have a fetcher
+        const enabledSources = Object.entries(sourcesConfig)
+            .filter(([key, src]) => src.enabled && SOURCE_FETCHERS[key]);
+
+        const total = enabledSources.length;
+        let completed = 0;
+        let totalNewPosts = 0;
+        const activeSources = [];
+
+        for (const [sourceKey, sourceConfig] of enabledSources) {
+            sendSSE({ type: 'progress', source: sourceKey, status: 'fetching', completed, total });
+
+            try {
+                const fetcher = SOURCE_FETCHERS[sourceKey];
+                // Fetchers that need keys get them as second arg
+                const rawPosts = ['reddit', 'twitter', 'youtube'].includes(sourceKey)
+                    ? await fetcher(sourceConfig, keys)
+                    : await fetcher(sourceConfig);
+
+                let newForSource = 0;
+                const existingIds = new Set(archive.posts.map(p => p.id));
+
+                for (const rawPost of rawPosts) {
+                    if (existingIds.has(rawPost.id)) continue; // deduplicate
+
+                    const enrichedPost = processPost(rawPost, config);
+                    archive.posts.push(enrichedPost);
+                    existingIds.add(rawPost.id);
+                    newForSource++;
+                }
+
+                if (newForSource > 0) activeSources.push(sourceKey);
+                totalNewPosts += newForSource;
+                completed++;
+
+                sendSSE({ type: 'progress', source: sourceKey, status: 'complete', newPosts: newForSource, completed, total });
+            } catch (err) {
+                completed++;
+                console.error(`[${sourceKey}] Error:`, err.message);
+                sendSSE({ type: 'progress', source: sourceKey, status: 'error', error: err.message, completed, total });
+            }
+        }
+
+        // Update metadata
+        archive.metadata.lastUpdate = new Date().toISOString();
+        archive.metadata.totalPosts = archive.posts.length;
+        archive.metadata.sources = activeSources.join(', ');
+
+        // Yearly archive split: if posts > 10000, move oldest complete year
+        if (archive.posts.length > 10000) {
+            // Sort by date
+            archive.posts.sort((a, b) => new Date(a.date) - new Date(b.date));
+            const currentYear = new Date().getFullYear();
+            const oldPosts = archive.posts.filter(p => new Date(p.date).getFullYear() < currentYear);
+            if (oldPosts.length > 0) {
+                const oldestYear = new Date(oldPosts[0].date).getFullYear();
+                const yearPosts = archive.posts.filter(p => new Date(p.date).getFullYear() === oldestYear);
+                const archiveFile = path.join(__dirname, `QC_Aviation_Complaints_archive_${oldestYear}.json`);
+
+                // Read existing archive file if it exists, merge
+                let yearArchive = { posts: [] };
+                try { yearArchive = JSON.parse(fs.readFileSync(archiveFile, 'utf8')); } catch {}
+                yearArchive.posts.push(...yearPosts);
+                writeJSON(archiveFile, yearArchive);
+
+                // Remove archived posts from main file
+                archive.posts = archive.posts.filter(p => new Date(p.date).getFullYear() !== oldestYear);
+                archive.metadata.totalPosts = archive.posts.length;
+            }
+        }
+
+        writeJSON(DATA_FILE, archive);
+        sendSSE({ type: 'complete', totalNew: totalNewPosts, totalArchive: archive.posts.length });
+
+    } catch (err) {
+        console.error('Update cycle error:', err);
+        sendSSE({ type: 'error', message: err.message });
+    } finally {
+        updateInProgress = false;
+    }
+}
+
 // ===== SSE BROADCAST =====
 function sendSSE(data) {
     const payload = 'data: ' + JSON.stringify(data) + '\n\n';
@@ -1007,7 +1105,7 @@ const server = http.createServer(async (req, res) => {
             'Connection':                  'keep-alive',
             'Access-Control-Allow-Origin': '*'
         });
-        res.write('data: {"status":"connected"}\n\n');
+        res.write('data: {"type":"connected"}\n\n');
 
         sseClients.add(res);
 
@@ -1017,10 +1115,16 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
-    // ---- POST /api/update — trigger data fetch cycle (stub) ----
+    // ---- POST /api/update — trigger data fetch cycle ----
     if (req.method === 'POST' && url === '/api/update') {
+        if (updateInProgress) {
+            res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+            res.end(JSON.stringify({ status: 'already_running' }));
+            return;
+        }
+        runUpdate(); // fire-and-forget — progress streamed via SSE
         res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
-        res.end(JSON.stringify({ status: 'ok' }));
+        res.end(JSON.stringify({ status: 'started' }));
         return;
     }
 
