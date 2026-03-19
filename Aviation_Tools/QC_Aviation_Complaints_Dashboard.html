@@ -1559,18 +1559,42 @@
        Task 9: Chart rendering functions
        ========================================================= */
 
+    const CHART_CATEGORIES = ['technology', 'airframe_manufacturer', 'engine_manufacturer', 'airline_operations', 'regulatory', 'mro_maintenance'];
+    const TREND_CHART_OPTIONS = {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: { duration: 300 },
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+            legend: { position: 'top', labels: { color: '#8fadc8', boxWidth: 12, font: { size: 10, family: 'Arial' } } },
+            tooltip: { backgroundColor: '#1a2332', titleColor: '#e0e0e0', bodyColor: '#8fadc8', borderColor: '#2a3a4a', borderWidth: 1 }
+        },
+        scales: {
+            x: { grid: { color: '#1a2332' }, ticks: { color: '#8fadc8', font: { size: 10, family: 'Arial' }, maxTicksLimit: 10 } },
+            y: { grid: { color: '#1a2332' }, ticks: { color: '#8fadc8', font: { size: 10, family: 'Arial' } }, beginAtZero: true }
+        }
+    };
+
     function renderTrendChart() {
         if (!STATE.summary || !STATE.summary.trendData) return;
-        const ctx = document.getElementById('trendChart').getContext('2d');
-        if (STATE.trendChartInstance) STATE.trendChartInstance.destroy();
 
         const labels = STATE.summary.trendData.map(d => {
             const dt = new Date(d.date);
             return dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
         });
 
-        const categories = ['technology', 'airframe_manufacturer', 'engine_manufacturer', 'airline_operations', 'regulatory', 'mro_maintenance'];
-        const datasets = categories.map(cat => ({
+        // If chart already exists, update data in place (much faster than destroy/recreate)
+        if (STATE.trendChartInstance) {
+            STATE.trendChartInstance.data.labels = labels;
+            CHART_CATEGORIES.forEach((cat, i) => {
+                STATE.trendChartInstance.data.datasets[i].data = STATE.summary.trendData.map(d => d[cat] || 0);
+            });
+            STATE.trendChartInstance.update('active');
+            return;
+        }
+
+        const ctx = document.getElementById('trendChart').getContext('2d');
+        const datasets = CHART_CATEGORIES.map(cat => ({
             label: CATEGORY_LABELS[cat],
             data: STATE.summary.trendData.map(d => d[cat] || 0),
             borderColor: CATEGORY_COLOURS[cat],
@@ -1584,33 +1608,30 @@
         STATE.trendChartInstance = new Chart(ctx, {
             type: 'line',
             data: { labels, datasets },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                interaction: { mode: 'index', intersect: false },
-                plugins: {
-                    legend: { position: 'top', labels: { color: '#8fadc8', boxWidth: 12, font: { size: 10, family: 'Arial' } } },
-                    tooltip: { backgroundColor: '#1a2332', titleColor: '#e0e0e0', bodyColor: '#8fadc8', borderColor: '#2a3a4a', borderWidth: 1 }
-                },
-                scales: {
-                    x: { grid: { color: '#1a2332' }, ticks: { color: '#8fadc8', font: { size: 10, family: 'Arial' }, maxTicksLimit: 10 } },
-                    y: { grid: { color: '#1a2332' }, ticks: { color: '#8fadc8', font: { size: 10, family: 'Arial' } }, beginAtZero: true }
-                }
-            }
+            options: TREND_CHART_OPTIONS
         });
     }
 
     function renderCategoryChart() {
         if (!STATE.summary || !STATE.summary.categoryBreakdown) return;
+
+        const labels = CHART_CATEGORIES.map(c => CATEGORY_LABELS[c]);
+        const data = CHART_CATEGORIES.map(c => (STATE.summary.categoryBreakdown[c] || {}).count || 0);
+        const colours = CHART_CATEGORIES.map(c => CATEGORY_COLOURS[c]);
+        const growths = CHART_CATEGORIES.map(c => (STATE.summary.categoryBreakdown[c] || {}).growth || 0);
+
+        // Update in place if chart exists
+        if (STATE.categoryChartInstance) {
+            STATE.categoryChartInstance.data.datasets[0].data = data;
+            STATE.categoryChartInstance.options.plugins.tooltip.callbacks.afterLabel = (ctx) => {
+                const g = growths[ctx.dataIndex];
+                return g > 0 ? `\u2191 ${g.toFixed(0)}%` : g < 0 ? `\u2193 ${Math.abs(g).toFixed(0)}%` : '\u2192 0%';
+            };
+            STATE.categoryChartInstance.update('active');
+            return;
+        }
+
         const ctx = document.getElementById('categoryChart').getContext('2d');
-        if (STATE.categoryChartInstance) STATE.categoryChartInstance.destroy();
-
-        const categories = ['technology', 'airframe_manufacturer', 'engine_manufacturer', 'airline_operations', 'regulatory', 'mro_maintenance'];
-        const labels = categories.map(c => CATEGORY_LABELS[c]);
-        const data = categories.map(c => (STATE.summary.categoryBreakdown[c] || {}).count || 0);
-        const colours = categories.map(c => CATEGORY_COLOURS[c]);
-        const growths = categories.map(c => (STATE.summary.categoryBreakdown[c] || {}).growth || 0);
-
         STATE.categoryChartInstance = new Chart(ctx, {
             type: 'bar',
             data: {
@@ -1626,6 +1647,7 @@
                 indexAxis: 'y',
                 responsive: true,
                 maintainAspectRatio: false,
+                animation: { duration: 300 },
                 plugins: {
                     legend: { display: false },
                     tooltip: {
@@ -1730,13 +1752,17 @@
         loadComplaints();
     }
 
-    /* Period toggle wiring */
+    /* Period toggle wiring — debounced to prevent lag from rapid clicks */
+    let periodToggleTimer = null;
     document.querySelectorAll('.chart-toggles .toggle').forEach(btn => {
         btn.addEventListener('click', () => {
             document.querySelectorAll('.chart-toggles .toggle').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
-            STATE.days = parseInt(btn.dataset.days);
-            loadSummary();
+            const newDays = parseInt(btn.dataset.days);
+            if (newDays === STATE.days) return;
+            STATE.days = newDays;
+            if (periodToggleTimer) clearTimeout(periodToggleTimer);
+            periodToggleTimer = setTimeout(() => loadSummary(), 150);
         });
     });
 

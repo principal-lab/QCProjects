@@ -105,6 +105,20 @@ function readJSON(filePath) {
 // ===== HELPER: WRITE JSON FILE =====
 function writeJSON(filePath, data) {
     fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
+    // Invalidate archive cache when data file is written
+    if (filePath === DATA_FILE) archiveCache = null;
+}
+
+// ===== IN-MEMORY ARCHIVE CACHE =====
+let archiveCache = null;
+
+function getArchive() {
+    if (!archiveCache) archiveCache = readJSON(DATA_FILE);
+    return archiveCache;
+}
+
+function invalidateArchiveCache() {
+    archiveCache = null;
 }
 
 // ===== HELPER: PARSE REQUEST BODY =====
@@ -1299,8 +1313,8 @@ const server = http.createServer(async (req, res) => {
             const page           = Math.max(1, parseInt(sp.get('page')  || '1',  10));
             const limit          = Math.max(1, parseInt(sp.get('limit') || '50', 10));
 
-            // Load main archive
-            const archive = readJSON(DATA_FILE);
+            // Load main archive (cached in memory)
+            const archive = getArchive();
             let posts = Array.isArray(archive.posts) ? [...archive.posts] : [];
 
             // Merge yearly archive files
@@ -1374,8 +1388,8 @@ const server = http.createServer(async (req, res) => {
             const days         = Math.max(1, parseInt(sp.get('days') || '30', 10));
             const filterRegion = sp.get('region') || null;
 
-            // Load main archive
-            const archive = readJSON(DATA_FILE);
+            // Load main archive (cached in memory)
+            const archive = getArchive();
             let allPosts = Array.isArray(archive.posts) ? [...archive.posts] : [];
 
             // Merge yearly archive files
