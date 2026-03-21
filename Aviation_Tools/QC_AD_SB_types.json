@@ -1,0 +1,72 @@
+{
+  "airbus": {
+    "label": "Airbus",
+    "colour": "#2196f3",
+    "aliases": ["AIRBUS S.A.S.", "AIRBUS OPERATIONS", "AIRBUS DEFENCE AND SPACE"],
+    "excludeAliases": ["AIRBUS HELICOPTERS"],
+    "families": ["A220", "A300", "A310", "A318", "A319", "A320", "A321", "A330", "A340", "A350", "A380"]
+  },
+  "boeing": {
+    "label": "Boeing",
+    "colour": "#ff9800",
+    "aliases": ["THE BOEING COMPANY", "BOEING COMMERCIAL AIRPLANES"],
+    "excludeAliases": [],
+    "families": ["707", "717", "727", "737", "747", "757", "767", "777", "787"]
+  },
+  "atr": {
+    "label": "ATR",
+    "colour": "#4caf50",
+    "aliases": ["ATR - GIE AVIONS DE TRANSPORT RÉGIONAL", "AVIONS DE TRANSPORT REGIONAL"],
+    "excludeAliases": [],
+    "families": ["ATR 42", "ATR 72"]
+  },
+  "embraer": {
+    "label": "Embraer",
+    "colour": "#9c27b0",
+    "aliases": ["EMBRAER S.A.", "EMBRAER - EMPRESA BRASILEIRA DE AERONÁUTICA"],
+    "excludeAliases": [],
+    "families": ["ERJ 135", "ERJ 140", "ERJ 145", "E170", "E175", "E190", "E195", "E2"]
+  },
+  "gulfstream": {
+    "label": "Gulfstream",
+    "colour": "#00bcd4",
+    "aliases": ["GULFSTREAM AEROSPACE CORPORATION", "GULFSTREAM AEROSPACE"],
+    "excludeAliases": [],
+    "families": ["G280", "G500", "G550", "G600", "G650", "G700"]
+  },
+  "bombardier": {
+    "label": "Bombardier",
+    "colour": "#e91e63",
+    "aliases": ["BOMBARDIER INC.", "BOMBARDIER AEROSPACE"],
+    "excludeAliases": [],
+    "families": ["CRJ", "Challenger 300", "Challenger 350", "Challenger 600", "Challenger 650", "Global 5000", "Global 5500", "Global 6000", "Global 6500", "Global 7500", "Global 8000"]
+  },
+  "dassault": {
+    "label": "Dassault Aviation",
+    "colour": "#ff5722",
+    "aliases": ["DASSAULT AVIATION SA", "DASSAULT AVIATION"],
+    "excludeAliases": [],
+    "families": ["Falcon 50", "Falcon 900", "Falcon 2000", "Falcon 7X", "Falcon 8X", "Falcon 6X", "Falcon 10X"]
+  },
+  "textron": {
+    "label": "Textron Aviation",
+    "colour": "#795548",
+    "aliases": ["TEXTRON AVIATION INC.", "TEXTRON AVIATION", "CESSNA AIRCRAFT COMPANY", "BEECHCRAFT CORPORATION", "HAWKER BEECHCRAFT"],
+    "excludeAliases": [],
+    "families": ["Citation", "King Air", "Baron", "Bonanza", "Caravan", "Cessna 172", "Cessna 182", "Cessna 206", "Cessna 208"]
+  },
+  "pilatus": {
+    "label": "Pilatus Aircraft",
+    "colour": "#607d8b",
+    "aliases": ["PILATUS AIRCRAFT LTD"],
+    "excludeAliases": [],
+    "families": ["PC-6", "PC-7", "PC-9", "PC-12", "PC-21", "PC-24"]
+  },
+  "honda": {
+    "label": "Honda Aircraft Company",
+    "colour": "#cddc39",
+    "aliases": ["HONDA AIRCRAFT COMPANY LLC", "HONDA AIRCRAFT COMPANY"],
+    "excludeAliases": [],
+    "families": ["HondaJet", "HondaJet Elite", "HondaJet Elite S", "HondaJet Elite II"]
+  }
+}

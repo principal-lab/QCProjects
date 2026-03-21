@@ -1,0 +1,30 @@
+{
+  "sources": {
+    "easa": {
+      "enabled": true,
+      "label": "EASA",
+      "baseUrl": "https://ad.easa.europa.eu",
+      "searchPath": "/search/advanced",
+      "rateLimitMs": 1000,
+      "maxPages": 20
+    },
+    "faa": {
+      "enabled": true,
+      "label": "FAA",
+      "baseUrl": "https://drs.faa.gov",
+      "searchPath": "/browse/ADFRAWD/doctypeDetails",
+      "emergencyPath": "/browse/ADFREAD/doctypeDetails",
+      "rateLimitMs": 2000,
+      "maxPages": 20
+    },
+    "casa": {
+      "enabled": true,
+      "label": "CASA",
+      "baseUrl": "https://www.casa.gov.au",
+      "dataFilesPath": "/aircraft/airworthiness/airworthiness-directives/data-files-all-airworthiness-directives",
+      "searchFallbackPath": "/search-centre/airworthiness-directives",
+      "rateLimitMs": 2000,
+      "maxPages": 20
+    }
+  }
+}
