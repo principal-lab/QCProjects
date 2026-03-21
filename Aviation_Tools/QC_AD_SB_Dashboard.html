@@ -1029,7 +1029,298 @@
     </div>
 
     <script>
-        // JavaScript will be added in Tasks 8-10
+        // ─── CONSTANTS ────────────────────────────────────────────────────────────
+        const MANUFACTURERS = {
+            airbus:     { label: 'Airbus',                  colour: '#2196f3', families: ['A220','A300','A310','A318','A319','A320','A321','A330','A340','A350','A380'] },
+            boeing:     { label: 'Boeing',                  colour: '#ff9800', families: ['707','717','727','737','747','757','767','777','787'] },
+            atr:        { label: 'ATR',                     colour: '#4caf50', families: ['ATR 42','ATR 72'] },
+            embraer:    { label: 'Embraer',                 colour: '#9c27b0', families: ['ERJ 135','ERJ 140','ERJ 145','E170','E175','E190','E195','E2'] },
+            gulfstream: { label: 'Gulfstream',              colour: '#00bcd4', families: ['G280','G500','G550','G600','G650','G700'] },
+            bombardier: { label: 'Bombardier',              colour: '#e91e63', families: ['CRJ','Challenger 300','Challenger 350','Challenger 600','Challenger 650','Global 5000','Global 5500','Global 6000','Global 6500','Global 7500','Global 8000'] },
+            dassault:   { label: 'Dassault Aviation',       colour: '#ff5722', families: ['Falcon 50','Falcon 900','Falcon 2000','Falcon 7X','Falcon 8X','Falcon 6X','Falcon 10X'] },
+            textron:    { label: 'Textron Aviation',        colour: '#795548', families: ['Citation','King Air','Baron','Bonanza','Caravan','Cessna 172','Cessna 182','Cessna 206','Cessna 208'] },
+            pilatus:    { label: 'Pilatus Aircraft',        colour: '#607d8b', families: ['PC-6','PC-7','PC-9','PC-12','PC-21','PC-24'] },
+            honda:      { label: 'Honda Aircraft Company',  colour: '#cddc39', families: ['HondaJet','HondaJet Elite','HondaJet Elite S','HondaJet Elite II'] }
+        };
+
+        const AGENCY_COLOURS = { easa: '#1565c0', faa: '#e65100', casa: '#2e7d32', manual: '#d4a843', ref: '#d4a843' };
+        const AGENCY_LABELS  = { easa: 'EASA', faa: 'FAA', casa: 'CASA', manual: 'MANUAL', ref: 'REF' };
+
+        // ─── STATE ────────────────────────────────────────────────────────────────
+        const STATE = {
+            filters: { types: [], agencies: [], manufacturers: [], families: [], urgencies: [], dateFrom: '', dateTo: '', search: '' },
+            summary: null,
+            directives: [],
+            page: 1,
+            limit: 50,
+            totalDirectives: 0,
+            trendMonths: 6,
+            trendChartInstance: null,
+            manufacturerChartInstance: null,
+            agencyChartInstance: null,
+            familyChartInstance: null
+        };
+
+        // ─── API HELPERS ──────────────────────────────────────────────────────────
+        async function api(endpoint) {
+            const res = await fetch(endpoint);
+            if (!res.ok) throw new Error(`API error: ${res.status}`);
+            return res.json();
+        }
+
+        function buildQueryString() {
+            const p = new URLSearchParams();
+            if (STATE.filters.types.length)         p.set('type',         STATE.filters.types.join(','));
+            if (STATE.filters.agencies.length)      p.set('agency',       STATE.filters.agencies.join(','));
+            if (STATE.filters.manufacturers.length) p.set('manufacturer', STATE.filters.manufacturers.join(','));
+            if (STATE.filters.families.length)      p.set('family',       STATE.filters.families.join(','));
+            if (STATE.filters.urgencies.length)     p.set('urgency',      STATE.filters.urgencies.join(','));
+            if (STATE.filters.dateFrom)             p.set('dateFrom',     STATE.filters.dateFrom);
+            if (STATE.filters.dateTo)               p.set('dateTo',       STATE.filters.dateTo);
+            if (STATE.filters.search)               p.set('search',       STATE.filters.search);
+            return p.toString();
+        }
+
+        // ─── DATA LOADERS ─────────────────────────────────────────────────────────
+        async function loadSummary() {
+            const qs = buildQueryString();
+            STATE.summary = await api('/api/summary' + (qs ? '?' + qs : ''));
+            renderKPIs();
+            if (typeof renderTrendChart        === 'function') renderTrendChart();
+            if (typeof renderManufacturerChart === 'function') renderManufacturerChart();
+            if (typeof renderAgencyChart       === 'function') renderAgencyChart();
+            if (typeof renderFamilyChart       === 'function') renderFamilyChart();
+            if (STATE.summary.lastUpdate) {
+                document.getElementById('lastUpdateTime').textContent = 'Last update: ' + formatDate(STATE.summary.lastUpdate);
+            }
+        }
+
+        async function loadDirectives(append = false) {
+            if (!append) STATE.page = 1;
+            const qs = buildQueryString();
+            const extra = qs ? '&' + qs : '';
+            const data = await api(`/api/directives?page=${STATE.page}&limit=${STATE.limit}${extra}`);
+            if (append) {
+                STATE.directives.push(...data.directives);
+            } else {
+                STATE.directives = data.directives;
+            }
+            STATE.totalDirectives = data.total;
+            renderFeed();
+        }
+
+        // ─── HELPER FUNCTIONS ─────────────────────────────────────────────────────
+        function formatDate(isoStr) {
+            if (!isoStr) return '—';
+            const d = new Date(isoStr);
+            if (isNaN(d)) return isoStr;
+            const months = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+            return String(d.getDate()).padStart(2,'0') + months[d.getMonth()] + d.getFullYear();
+        }
+
+        function timeAgo(isoStr) {
+            if (!isoStr) return '';
+            const diff = Date.now() - new Date(isoStr).getTime();
+            const days = Math.floor(diff / 86400000);
+            if (days === 0) return 'Today';
+            if (days === 1) return 'Yesterday';
+            if (days < 30)  return days + ' days ago';
+            if (days < 365) return Math.floor(days / 30) + ' months ago';
+            return Math.floor(days / 365) + ' years ago';
+        }
+
+        function truncate(str, maxLen) {
+            if (!str || str.length <= maxLen) return str || '';
+            return str.slice(0, maxLen) + '…';
+        }
+
+        function getBorderColour(d) {
+            if (d.urgency === 'emergency') return 'var(--status-red)';
+            if (d.type === 'SB') return 'var(--accent-gold)';
+            return AGENCY_COLOURS[d.agency] || '#2a3a4a';
+        }
+
+        // ─── KPI RENDERER ─────────────────────────────────────────────────────────
+        function renderKPIs() {
+            if (!STATE.summary) return;
+            document.getElementById('kpiTotalADs').textContent       = STATE.summary.totalADs.toLocaleString();
+            document.getElementById('kpiTotalSBs').textContent       = STATE.summary.totalSBs.toLocaleString();
+            document.getElementById('kpiEmergencyADs').textContent   = STATE.summary.emergencyADs.toLocaleString();
+            const newADs = STATE.summary.newADsThisMonth || 0;
+            document.getElementById('kpiNewADs').textContent         = newADs > 0 ? `↑ ${newADs} new ADs this month` : '';
+            const newEmg = STATE.summary.newEmergencyThisMonth || 0;
+            document.getElementById('kpiNewEmergency').textContent   = newEmg > 0 ? `↑ ${newEmg} new emergency this month` : '';
+        }
+
+        // ─── FEED RENDERER ────────────────────────────────────────────────────────
+        function renderFeed() {
+            const feedList   = document.getElementById('feedList');
+            const feedCount  = document.getElementById('feedCount');
+            const btnLoadMore = document.getElementById('btnLoadMore');
+
+            // Update count label
+            feedCount.textContent = `(${STATE.totalDirectives} results)`;
+
+            // Show/hide Load More
+            btnLoadMore.style.display = STATE.directives.length < STATE.totalDirectives ? 'block' : 'none';
+
+            if (!STATE.directives.length) {
+                feedList.innerHTML = '<div class="empty-state">No items match your filters.</div>';
+                return;
+            }
+
+            feedList.innerHTML = STATE.directives.map(d => {
+                const mfr         = MANUFACTURERS[d.manufacturer] || { label: d.manufacturer || 'Unknown', colour: '#666' };
+                const borderColour = getBorderColour(d);
+                const sourceLabel  = AGENCY_LABELS[d.agency] || d.agency || '';
+                const emergencyBadge = d.urgency === 'emergency'
+                    ? `<span class="urgency-emergency">EMERGENCY</span> `
+                    : '';
+
+                // Tags row
+                const mfrTag    = `<span class="category-tag" style="background:${mfr.colour}22;color:${mfr.colour}">${mfr.label}</span>`;
+                const familyTag = d.family
+                    ? `<span class="category-tag" style="background:#ffffff15;color:var(--text-secondary)">${d.family}</span>`
+                    : '';
+                const typeClass = d.type === 'SB' ? 'sb' : 'ad';
+                const typeTag   = `<span class="category-tag ${typeClass}">${d.type || 'AD'}</span>`;
+
+                // Feed body (expanded detail)
+                const summaryLine      = d.summary       ? `<div><strong>Summary:</strong> ${d.summary}</div>` : '';
+                const variantLine      = d.variant       ? `<div><strong>Variant:</strong> ${d.variant}</div>` : '';
+                const applicabilityLine = d.applicability ? `<div><strong>Applicability:</strong> ${d.applicability}</div>` : '';
+                const complianceLine   = d.compliance    ? `<div><strong>Compliance:</strong> ${d.compliance}</div>` : '';
+                const refSBsLine       = (d.referencedSBs && d.referencedSBs.length)
+                    ? `<div><strong>Referenced SBs:</strong> ${d.referencedSBs.join(', ')}</div>`
+                    : '';
+                const sourceLink       = d.sourceUrl
+                    ? `<div style="margin-top:6px"><a class="feed-link" href="${d.sourceUrl}" target="_blank" rel="noopener">View source &#8594;</a></div>`
+                    : '';
+
+                return `<div class="feed-item" style="border-left-color:${borderColour}" onclick="toggleFeedItem(this)">
+                    <div class="feed-source">${emergencyBadge}${sourceLabel}</div>
+                    <div class="feed-title">${truncate(d.subject || d.title || d.number || 'Untitled', 120)}</div>
+                    <div class="feed-tags">${mfrTag}${familyTag}${typeTag}</div>
+                    <div class="feed-date">${formatDate(d.issueDate || d.date)} &middot; ${timeAgo(d.issueDate || d.date)}</div>
+                    <div class="feed-body">
+                        ${summaryLine}${variantLine}${applicabilityLine}${complianceLine}${refSBsLine}${sourceLink}
+                    </div>
+                </div>`;
+            }).join('');
+        }
+
+        // ─── TOGGLE FEED ITEM ─────────────────────────────────────────────────────
+        function toggleFeedItem(el) {
+            el.classList.toggle('expanded');
+        }
+
+        // ─── FILTER LOGIC ─────────────────────────────────────────────────────────
+        function updateFiltersFromDropdowns() {
+            STATE.filters.types         = [...document.querySelectorAll('.filter-menu input[data-filter="type"]:checked')].map(cb => cb.value);
+            STATE.filters.agencies      = [...document.querySelectorAll('.filter-menu input[data-filter="agency"]:checked')].map(cb => cb.value);
+            STATE.filters.manufacturers = [...document.querySelectorAll('.filter-menu input[data-filter="manufacturer"]:checked')].map(cb => cb.value);
+            STATE.filters.families      = [...document.querySelectorAll('.filter-menu input[data-filter="family"]:checked')].map(cb => cb.value);
+            STATE.filters.urgencies     = [...document.querySelectorAll('.filter-menu input[data-filter="urgency"]:checked')].map(cb => cb.value);
+
+            // Update filter count badges on each dropdown button
+            document.querySelectorAll('.filter-dropdown').forEach(dd => {
+                const checkedCount = dd.querySelectorAll('.filter-menu input[type="checkbox"]:checked').length;
+                let badge = dd.querySelector('.filter-count');
+                if (checkedCount > 0) {
+                    if (!badge) {
+                        badge = document.createElement('span');
+                        badge.className = 'filter-count';
+                        dd.querySelector('.filter-btn').appendChild(badge);
+                    }
+                    badge.textContent = checkedCount;
+                } else if (badge) {
+                    badge.remove();
+                }
+            });
+
+            // Rebuild family dropdown based on selected manufacturers
+            updateFamilyFilter();
+        }
+
+        function updateFamilyFilter() {
+            const menu = document.getElementById('familyFilterMenu');
+            if (!menu) return;
+            const selectedMfrs = STATE.filters.manufacturers;
+            let families = [];
+            if (selectedMfrs.length === 0) {
+                // Show all families from all manufacturers
+                for (const mfr of Object.values(MANUFACTURERS)) families.push(...mfr.families);
+            } else {
+                for (const key of selectedMfrs) {
+                    if (MANUFACTURERS[key]) families.push(...MANUFACTURERS[key].families);
+                }
+            }
+            families = [...new Set(families)].sort();
+            menu.innerHTML = families.map(f =>
+                `<label><input type="checkbox" data-filter="family" value="${f}" ${STATE.filters.families.includes(f) ? 'checked' : ''}> ${f}</label>`
+            ).join('');
+            // Re-attach change handlers after DOM rebuild
+            menu.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+                cb.addEventListener('change', () => {
+                    updateFiltersFromDropdowns();
+                    loadDirectives();
+                    loadSummary();
+                });
+            });
+        }
+
+        // ─── DROPDOWN TOGGLE HANDLERS ─────────────────────────────────────────────
+        document.querySelectorAll('.filter-dropdown').forEach(dd => {
+            const btn  = dd.querySelector('.filter-btn');
+            const menu = dd.querySelector('.filter-menu');
+
+            // Toggle open/close on button click
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const isOpen = menu.style.display !== 'none';
+                // Close all menus first
+                document.querySelectorAll('.filter-menu').forEach(m => { m.style.display = 'none'; });
+                if (!isOpen) menu.style.display = 'block';
+            });
+
+            // Checkbox change triggers filter update and data reload
+            menu.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+                cb.addEventListener('change', () => {
+                    updateFiltersFromDropdowns();
+                    loadDirectives();
+                    loadSummary();
+                });
+            });
+        });
+
+        // Close any open dropdown when clicking outside
+        document.addEventListener('click', () => {
+            document.querySelectorAll('.filter-menu').forEach(m => { m.style.display = 'none'; });
+        });
+
+        // ─── DATE RANGE HANDLERS ──────────────────────────────────────────────────
+        const dateFromEl = document.getElementById('dateFrom');
+        const dateToEl   = document.getElementById('dateTo');
+        if (dateFromEl) dateFromEl.addEventListener('change', () => { STATE.filters.dateFrom = dateFromEl.value; loadDirectives(); loadSummary(); });
+        if (dateToEl)   dateToEl.addEventListener('change',   () => { STATE.filters.dateTo   = dateToEl.value;   loadDirectives(); loadSummary(); });
+
+        // ─── SEARCH HANDLER (debounced) ───────────────────────────────────────────
+        let searchTimer;
+        const feedSearchEl = document.getElementById('feedSearch');
+        if (feedSearchEl) {
+            feedSearchEl.addEventListener('input', (e) => {
+                clearTimeout(searchTimer);
+                searchTimer = setTimeout(() => { STATE.filters.search = e.target.value; loadDirectives(); }, 300);
+            });
+        }
+
+        // ─── LOAD MORE ────────────────────────────────────────────────────────────
+        document.getElementById('btnLoadMore').addEventListener('click', () => { STATE.page++; loadDirectives(true); });
+
+        // ─── INITIAL LOAD ─────────────────────────────────────────────────────────
+        loadSummary();
+        loadDirectives();
+        updateFamilyFilter();
     </script>
 
 </body>
