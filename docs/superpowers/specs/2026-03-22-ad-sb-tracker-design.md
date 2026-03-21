@@ -111,11 +111,82 @@ Dark theme matching existing QC dashboards:
 
 ### 3.5 Agency Colour Palette
 
+Distinct from manufacturer colours to avoid visual confusion:
+
 | Agency | Colour |
 |--------|--------|
-| EASA | `#2196f3` (blue) |
-| FAA | `#ff9800` (orange) |
-| CASA | `#4caf50` (green) |
+| EASA | `#1565c0` (dark blue) |
+| FAA | `#e65100` (dark orange) |
+| CASA | `#2e7d32` (dark green) |
+
+### 3.6 Data File Schema (`QC_AD_SB_data.json`)
+
+```json
+{
+  "metadata": {
+    "title": "AD/SB Intelligence Tracker",
+    "lastUpdate": "2026-03-22T10:00:00Z",
+    "totalRecords": 1685,
+    "sources": "easa, faa, casa"
+  },
+  "directives": [ ...array of records per schema in 3.1... ]
+}
+```
+
+### 3.7 Sources Config Schema (`QC_AD_SB_sources.json`)
+
+```json
+{
+  "sources": {
+    "easa": {
+      "enabled": true,
+      "label": "EASA",
+      "baseUrl": "https://ad.easa.europa.eu",
+      "searchPath": "/search/advanced",
+      "rateLimitMs": 1000,
+      "maxPages": 20
+    },
+    "faa": {
+      "enabled": true,
+      "label": "FAA",
+      "baseUrl": "https://drs.faa.gov",
+      "searchPath": "/browse/ADFRAWD/doctypeDetails",
+      "emergencyPath": "/browse/ADFREAD/doctypeDetails",
+      "rateLimitMs": 2000,
+      "maxPages": 20
+    },
+    "casa": {
+      "enabled": true,
+      "label": "CASA",
+      "baseUrl": "https://www.casa.gov.au",
+      "dataFilesPath": "/aircraft/airworthiness/airworthiness-directives/data-files-all-airworthiness-directives",
+      "searchFallbackPath": "/search-centre/airworthiness-directives",
+      "rateLimitMs": 2000,
+      "maxPages": 20
+    }
+  }
+}
+```
+
+### 3.8 Types Config Schema (`QC_AD_SB_types.json`)
+
+```json
+{
+  "airbus": {
+    "label": "Airbus",
+    "aliases": ["AIRBUS S.A.S.", "AIRBUS OPERATIONS", "AIRBUS DEFENCE"],
+    "excludeAliases": ["AIRBUS HELICOPTERS"],
+    "families": ["A220", "A300", "A310", "A318", "A319", "A320", "A321", "A330", "A340", "A350", "A380"]
+  },
+  "boeing": {
+    "label": "Boeing",
+    "aliases": ["THE BOEING COMPANY", "BOEING COMMERCIAL"],
+    "families": ["707", "717", "727", "737", "747", "757", "767", "777", "787"]
+  }
+}
+```
+
+(Full mapping for all 10 manufacturers follows the same structure.)
 
 ---
 
@@ -130,7 +201,7 @@ Dark theme matching existing QC dashboards:
 | `/api/directives` | GET | Paginated/filtered directive list |
 | `/api/update` | POST | Trigger fetch from all agencies |
 | `/api/update-status` | GET (SSE) | Stream progress during update |
-| `/api/manual-add` | POST | Add an SB entry manually |
+| `/api/manual-add` | POST | Add an SB entry manually (body: `{ number, manufacturer, family, subject, summary, sourceUrl }`) |
 
 ### 4.2 Filter Parameters
 
@@ -149,6 +220,10 @@ Shared across `/api/summary` and `/api/directives`:
 | `page` | number | Page number (default 1) |
 | `limit` | number | Results per page (default 50) |
 
+**Filter semantics on `/api/summary`:** All filters apply to the entire summary — counts, breakdowns, and trend data all reflect only the filtered subset. For example, filtering to "Boeing only" returns `byManufacturer` with only Boeing having a non-zero count, `byFamily` showing only Boeing families, and trend data for Boeing ADs only. This ensures the summary and feed are always in sync.
+
+**Sort order:** Directives are always sorted by `publishDate` descending (newest first). Sort order is not parameterisable.
+
 ### 4.3 Summary Response
 
 ```json
@@ -156,7 +231,8 @@ Shared across `/api/summary` and `/api/directives`:
   "totalADs": 1247,
   "totalSBs": 438,
   "emergencyADs": 23,
-  "newThisMonth": 12,
+  "newADsThisMonth": 12,
+  "newEmergencyThisMonth": 3,
   "byManufacturer": {
     "airbus": 412,
     "boeing": 378,
@@ -180,10 +256,11 @@ Shared across `/api/summary` and `/api/directives`:
     ...
   },
   "trend": [
-    { "month": "2025-04", "count": 42 },
-    { "month": "2025-05", "count": 51 },
+    { "month": "2025-04", "adCount": 42, "sbCount": 8 },
+    { "month": "2025-05", "adCount": 51, "sbCount": 12 },
     ...
-  ]
+  ],
+  "lastUpdate": "2026-03-22T10:00:00Z"
 }
 ```
 
@@ -202,30 +279,42 @@ Shared across `/api/summary` and `/api/directives`:
 
 ## 5. Data Sources and Fetchers
 
-### 5.1 EASA — REST API
+### 5.1 EASA — Safety Publications Tool (HTML Scraping)
 
-- **Endpoint:** `https://ad.easa.europa.eu/api/ADs`
-- **Method:** GET with query parameters for type certificate holder, date range
-- **Response:** Structured JSON with AD number, subject, applicability, publication date, effective date, and PDF link
-- **Parsing:** Direct JSON mapping — most reliable source
-- **Rate limit:** Respectful 1-second delay between paginated requests
+- **URL:** `https://ad.easa.europa.eu/` (Safety Publications Tool)
+- **Method:** HTML scraping of search results and biweekly AD listing pages at `https://ad.easa.europa.eu/biweekly`
+- **Note:** EASA does not provide a documented public JSON API. The `ad.easa.europa.eu/api/ADs` endpoint referenced in some documentation is not a reliable public API. The Complaints Dashboard sources.json has the EASA API disabled with the note: "EASA API endpoints do not return standard RSS."
+- **Fields extracted:** AD number, type certificate holder, subject, applicability, publication date, effective date, PDF link
+- **Parsing:** HTML parsing of search result pages with regex extraction; individual AD detail pages for summary text
+- **Fallback:** EASA RSS feed at `https://www.easa.europa.eu/rss.xml` for new AD announcements as a lighter-weight supplement
+- **Rate limit:** 1-second delay between page requests
 
-### 5.2 FAA — Regulatory and Guidance Library
+### 5.2 FAA — Dynamic Regulatory System (DRS)
 
-- **URL:** `https://rgl.faa.gov/Regulatory_and_Guidance_Library/rgAD.nsf/`
-- **Method:** HTML scraping of search results pages
+- **URL:** `https://drs.faa.gov/browse/ADFRAWD/doctypeDetails` (standard ADs), `https://drs.faa.gov/browse/ADFREAD/doctypeDetails` (emergency ADs)
+- **Note:** The legacy Regulatory and Guidance Library (RGL) at `rgl.faa.gov` has been migrated to the Dynamic Regulatory System (DRS). The DRS is the current authoritative source.
+- **Method:** HTML scraping of DRS search results pages
 - **Fields extracted:** AD number, product (manufacturer/type), subject, effective date, amendment details
 - **PDF links:** Each AD has a direct PDF link
-- **Parsing:** Regex-based extraction from HTML table rows
+- **Parsing:** HTML parsing of search result tables with regex for field extraction
 - **Rate limit:** 2-second delay between page requests
 
-### 5.3 CASA — Airworthiness Directives Search
+### 5.3 CASA — Airworthiness Directives (Data Files + Scraping)
 
-- **URL:** `https://www.casa.gov.au/search-centre/airworthiness-directives`
-- **Method:** HTML scraping (similar to existing CASA news scraper in Complaints server)
+- **Primary URL:** `https://www.casa.gov.au/aircraft/airworthiness/airworthiness-directives/data-files-all-airworthiness-directives` — CASA publishes downloadable data files for all current Australian ADs; this is the most reliable source
+- **Fallback URL:** `https://services.casa.gov.au/airworth/airwd/` — online AD search interface
+- **Method:** Primary: download and parse CASA data files (structured data, more reliable than scraping). Fallback: HTML scraping of search interface
 - **Fields extracted:** AD number, applicability, subject, effective date
-- **Parsing:** HTML table/list parsing with regex for manufacturer/type extraction
+- **Parsing:** Data file parsing (CSV/structured format) or HTML table parsing with regex for manufacturer/type extraction
 - **Rate limit:** 2-second delay between page requests
+
+### 5.4 Fetcher Resilience
+
+- Each agency fetcher runs independently with a 30-second timeout
+- A failed fetcher does not block other agencies from completing
+- SSE reports failures: `{ type: 'progress', agency: 'faa', status: 'error', message: 'Timeout' }`
+- Dashboard displays partial results with a warning banner indicating which agencies failed
+- HTML scraping is inherently fragile; the server logs detailed parsing errors for debugging when page structures change
 
 ### 5.4 Auto-Classification Pipeline
 
@@ -252,7 +341,7 @@ Mirroring QC_Aviation_Complaints_Dashboard:
 
 ```
 ┌──────────────────────────────────────────────────────┐
-│ HEADER: QC logo | AD/SB Intelligence Tracker | UPDATE│
+│ HEADER: QC logo | AD/SB Intelligence Tracker | Last update timestamp | UPDATE│
 ├──────────────────────────────────────────────────────┤
 │ FILTER BAR: Type | Agency | Manufacturer | Family |  │
 │             Urgency | Date Range                     │
@@ -284,9 +373,9 @@ Mirroring QC_Aviation_Complaints_Dashboard:
 
 | Card | Value | Subtitle |
 |------|-------|----------|
-| Total ADs | Count | "↑ X this month" |
+| Total ADs | Count | "↑ X new ADs this month" |
 | Total SBs | Count | "Referenced + Manual" |
-| Emergency ADs | Count (red) | "↑ X this month" |
+| Emergency ADs | Count (red) | "↑ X new emergency this month" |
 | Manufacturers | 10 | "Tracked" |
 
 ### 6.3 Charts (Chart.js)
