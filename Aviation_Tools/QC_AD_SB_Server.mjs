@@ -430,16 +430,249 @@ async function fetchEASA(sourceConfig) {
     }
 }
 
-// ===== FAA FETCHER (stub — implemented in Task 6) =====
-async function fetchFAA(sourceConfig) {
-    console.log('[fetchFAA] Not yet implemented');
-    return [];
+// ===== HELPER: EXTRACT DATE FROM TEXT =====
+function extractDateFromText(text) {
+    // Try various date formats
+    const patterns = [
+        /(\d{4}-\d{2}-\d{2})/,                    // ISO format
+        /(\d{1,2})\/(\d{1,2})\/(\d{4})/,          // MM/DD/YYYY
+        /(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\s+(\d{4})/i  // DD Mon YYYY
+    ];
+
+    for (const pat of patterns) {
+        const m = text.match(pat);
+        if (m) {
+            if (m[0].match(/^\d{4}-\d{2}-\d{2}$/)) return m[0];
+            if (m[2] && m[3] && /^\d+$/.test(m[2])) {
+                // MM/DD/YYYY
+                return `${m[3]}-${m[1].padStart(2,'0')}-${m[2].padStart(2,'0')}`;
+            }
+            if (m[2] && /[A-Za-z]/.test(m[2])) {
+                const months = { jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12 };
+                const mon = months[m[2].toLowerCase().slice(0,3)];
+                if (mon) return `${m[3]}-${String(mon).padStart(2,'0')}-${m[1].padStart(2,'0')}`;
+            }
+        }
+    }
+    return null;
 }
 
-// ===== CASA FETCHER (stub — implemented in Task 6) =====
+// ===== HELPER: EXTRACT DATE FROM CONTEXT AROUND A POSITION =====
+function extractDateFromContext(html, position) {
+    // Look for date patterns near the match position
+    const context = html.substring(Math.max(0, position - 200), position + 200);
+    return extractDateFromText(context);
+}
+
+// ===== HELPER: PARSE CSV AD DATA =====
+function parseCSVADs(csvContent) {
+    const results = [];
+    const lines = csvContent.split('\n');
+    if (lines.length < 2) return results;
+
+    // Try to identify header row
+    const header = lines[0].toLowerCase();
+    const hasHeader = header.includes('ad') || header.includes('number') || header.includes('subject');
+    const startRow = hasHeader ? 1 : 0;
+
+    for (let i = startRow; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line) continue;
+
+        // Split by comma (handle quoted fields)
+        const fields = line.match(/("([^"]*)"|[^,]*)/g) || [];
+        const cleaned = fields.map(f => f.replace(/^"|"$/g, '').trim());
+
+        if (cleaned.length < 2) continue;
+
+        // Try to identify AD number (typically first column with "AD/" or alphanumeric pattern)
+        const adNumber = cleaned.find(f => /^AD\//.test(f) || /^\d{4}-\d/.test(f));
+        if (!adNumber) continue;
+
+        const subject = cleaned.find((f, idx) => idx > 0 && f.length > 10) || cleaned[1] || '';
+        const dateField = cleaned.find(f => /\d{4}/.test(f) && (f.includes('-') || f.includes('/')));
+
+        results.push({
+            number: adNumber,
+            subject,
+            summary: subject,
+            applicability: cleaned[2] || '',
+            publishDate: extractDateFromText(dateField || '') || new Date().toISOString().slice(0, 10),
+            effectiveDate: null,
+            sourceUrl: `https://www.casa.gov.au/search-centre/airworthiness-directives`
+        });
+    }
+    return results;
+}
+
+// ===== FAA FETCHER =====
+async function fetchFAA(sourceConfig) {
+    const results = [];
+    try {
+        // Fetch standard ADs
+        const standardUrl = `${sourceConfig.baseUrl}${sourceConfig.searchPath}`;
+        console.log('[fetchFAA] Fetching standard ADs from:', standardUrl);
+
+        let html;
+        try {
+            html = await httpsGet(standardUrl, 30000);
+        } catch (err) {
+            console.warn('[fetchFAA] Failed to fetch standard ADs:', err.message);
+            html = '';
+        }
+
+        // Parse AD entries from the HTML
+        // DRS pages typically have table rows or list items with AD information
+        // Look for AD number patterns like "20XX-XX-XX" or "AD 20XX-XX-XX"
+        const adPattern = /(?:AD\s+)?(\d{4}-\d{2}-\d{2}(?:R\d+)?)\s*[:\-–]\s*([^<\n]+)/gi;
+        let match;
+        while ((match = adPattern.exec(html)) !== null) {
+            const number = match[1].trim();
+            const subject = match[2].trim();
+            results.push({
+                number: `AD ${number}`,
+                subject,
+                summary: subject,
+                applicability: '',
+                publishDate: extractDateFromContext(html, match.index) || new Date().toISOString().slice(0, 10),
+                effectiveDate: null,
+                sourceUrl: `https://drs.faa.gov/browse/excelExternalView/drafts/adfrawd/document/${number}`
+            });
+        }
+
+        // Also try to find ADs in table structures
+        const tableRowPattern = /<tr[^>]*>[\s\S]*?<td[^>]*>([\s\S]*?)<\/td>[\s\S]*?<td[^>]*>([\s\S]*?)<\/td>[\s\S]*?<td[^>]*>([\s\S]*?)<\/td>/gi;
+        while ((match = tableRowPattern.exec(html)) !== null) {
+            const cell1 = match[1].replace(/<[^>]+>/g, '').trim();
+            const cell2 = match[2].replace(/<[^>]+>/g, '').trim();
+            const cell3 = match[3].replace(/<[^>]+>/g, '').trim();
+
+            // Check if cell1 looks like an AD number
+            if (/^\d{4}-\d{2}-\d{2}/.test(cell1) && !results.some(r => r.number.includes(cell1))) {
+                results.push({
+                    number: `AD ${cell1}`,
+                    subject: cell2 || cell3,
+                    summary: cell2 || cell3,
+                    applicability: cell3 || '',
+                    publishDate: extractDateFromText(cell2 + ' ' + cell3) || new Date().toISOString().slice(0, 10),
+                    effectiveDate: null,
+                    sourceUrl: `https://drs.faa.gov/browse/excelExternalView/drafts/adfrawd/document/${cell1}`
+                });
+            }
+        }
+
+        // Fetch emergency ADs
+        if (sourceConfig.emergencyPath) {
+            await new Promise(r => setTimeout(r, sourceConfig.rateLimitMs));
+            try {
+                const eadUrl = `${sourceConfig.baseUrl}${sourceConfig.emergencyPath}`;
+                console.log('[fetchFAA] Fetching emergency ADs from:', eadUrl);
+                const eadHtml = await httpsGet(eadUrl, 30000);
+
+                let eadMatch;
+                const eadPattern = /(?:EAD|AD)\s+(\d{4}-\d{2}-\d{2}(?:R\d+)?(?:\s*Emergency)?)\s*[:\-–]\s*([^<\n]+)/gi;
+                while ((eadMatch = eadPattern.exec(eadHtml)) !== null) {
+                    const number = eadMatch[1].trim();
+                    const subject = eadMatch[2].trim();
+                    if (!results.some(r => r.number.includes(number))) {
+                        results.push({
+                            number: `EAD ${number}`,
+                            subject,
+                            summary: subject,
+                            applicability: '',
+                            publishDate: new Date().toISOString().slice(0, 10),
+                            effectiveDate: null,
+                            sourceUrl: `https://drs.faa.gov/browse/excelExternalView/drafts/adfread/document/${number}`,
+                            _isEmergency: true
+                        });
+                    }
+                }
+            } catch (err) {
+                console.warn('[fetchFAA] Failed to fetch emergency ADs:', err.message);
+            }
+        }
+
+        console.log(`[fetchFAA] Found ${results.length} ADs`);
+    } catch (err) {
+        console.error('[fetchFAA] Error:', err.message);
+    }
+    return results;
+}
+
+// ===== CASA FETCHER =====
 async function fetchCASA(sourceConfig) {
-    console.log('[fetchCASA] Not yet implemented');
-    return [];
+    const results = [];
+    try {
+        // Primary: try CASA data files page
+        const dataFilesUrl = `${sourceConfig.baseUrl}${sourceConfig.dataFilesPath}`;
+        console.log('[fetchCASA] Fetching data files page from:', dataFilesUrl);
+
+        let html;
+        try {
+            html = await httpsGet(dataFilesUrl, 30000);
+        } catch (err) {
+            console.warn('[fetchCASA] Data files page failed, trying fallback:', err.message);
+            html = '';
+        }
+
+        // Look for links to downloadable AD data files (CSV, XLS, etc.)
+        const fileLinks = [];
+        const linkPattern = /href="([^"]*(?:csv|xls|xlsx|data)[^"]*)"/gi;
+        let linkMatch;
+        while ((linkMatch = linkPattern.exec(html)) !== null) {
+            fileLinks.push(linkMatch[1]);
+        }
+
+        if (fileLinks.length > 0) {
+            console.log(`[fetchCASA] Found ${fileLinks.length} data file links`);
+            // Try to download and parse the first CSV-like file
+            for (const link of fileLinks.slice(0, 3)) {
+                await new Promise(r => setTimeout(r, sourceConfig.rateLimitMs));
+                try {
+                    const fileUrl = link.startsWith('http') ? link : `${sourceConfig.baseUrl}${link}`;
+                    const fileContent = await httpsGet(fileUrl, 30000);
+                    const parsed = parseCSVADs(fileContent);
+                    results.push(...parsed);
+                    if (results.length > 0) break; // Got data, stop trying more files
+                } catch (err) {
+                    console.warn('[fetchCASA] Failed to fetch data file:', link, err.message);
+                }
+            }
+        }
+
+        // Fallback: scrape the search interface
+        if (results.length === 0 && sourceConfig.searchFallbackPath) {
+            console.log('[fetchCASA] Trying fallback search interface');
+            const searchUrl = `https://services.casa.gov.au/airworth/airwd/`;
+            try {
+                await new Promise(r => setTimeout(r, sourceConfig.rateLimitMs));
+                const searchHtml = await httpsGet(searchUrl, 30000);
+
+                // Parse AD entries from search results
+                // CASA ADs typically have numbers like "AD/XXX/NNN"
+                const casaAdPattern = /(?:AD\/)([A-Z0-9]+\/\d+(?:\/\d+)?(?:\s+Amdt\s+\d+)?)\s*[-–:]\s*([^<\n]+)/gi;
+                let casaMatch;
+                while ((casaMatch = casaAdPattern.exec(searchHtml)) !== null) {
+                    results.push({
+                        number: `AD/${casaMatch[1].trim()}`,
+                        subject: casaMatch[2].trim(),
+                        summary: casaMatch[2].trim(),
+                        applicability: '',
+                        publishDate: extractDateFromText(searchHtml.substring(casaMatch.index, casaMatch.index + 300)) || new Date().toISOString().slice(0, 10),
+                        effectiveDate: null,
+                        sourceUrl: `https://www.casa.gov.au/search-centre/airworthiness-directives`
+                    });
+                }
+            } catch (err) {
+                console.warn('[fetchCASA] Fallback search failed:', err.message);
+            }
+        }
+
+        console.log(`[fetchCASA] Found ${results.length} ADs`);
+    } catch (err) {
+        console.error('[fetchCASA] Error:', err.message);
+    }
+    return results;
 }
 
 // ===== UPDATE ORCHESTRATOR =====
