@@ -130,6 +130,145 @@ function serveFile(filePath, res) {
     });
 }
 
+// ===== HELPER: HASH STRING (for deterministic IDs) =====
+function hashString(str) {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+        const char = str.charCodeAt(i);
+        hash = ((hash << 5) - hash) + char;
+        hash |= 0;
+    }
+    return Math.abs(hash).toString(36);
+}
+
+// ===== CLASSIFICATION: AUTO-CLASSIFY A RAW DIRECTIVE =====
+function classifyDirective(raw) {
+    const types = loadTypes();
+
+    const searchText = (
+        (raw.subject || '') + ' ' +
+        (raw.applicability || '') + ' ' +
+        (raw.summary || '')
+    ).toUpperCase();
+
+    // --- Manufacturer extraction ---
+    raw.manufacturer = 'unknown';
+    outer:
+    for (const [key, mfr] of Object.entries(types)) {
+        const aliases = Array.isArray(mfr.aliases) ? mfr.aliases : [];
+        const candidates = [mfr.label, ...aliases].filter(Boolean);
+
+        // Check exclude aliases first
+        const excludes = Array.isArray(mfr.excludeAliases) ? mfr.excludeAliases : [];
+        for (const ex of excludes) {
+            if (searchText.toUpperCase().includes(ex.toUpperCase())) continue outer;
+        }
+
+        for (const alias of candidates) {
+            if (searchText.toUpperCase().includes(alias.toUpperCase())) {
+                raw.manufacturer = key;
+                break outer;
+            }
+        }
+    }
+
+    // --- Family matching ---
+    raw.family = null;
+    const mfrConfig = types[raw.manufacturer];
+    if (mfrConfig && Array.isArray(mfrConfig.families)) {
+        for (const family of mfrConfig.families) {
+            const name = typeof family === 'string' ? family : family.name;
+            if (!name) continue;
+            let pattern;
+            if (name.length <= 4) {
+                pattern = new RegExp('\\b' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'i');
+            } else {
+                pattern = new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+            }
+            if (pattern.test(searchText)) {
+                raw.family = typeof family === 'string' ? family : family.name;
+                break;
+            }
+        }
+    }
+
+    // --- Variant extraction ---
+    raw.variant = null;
+    if (raw.manufacturer === 'airbus') {
+        const m = searchText.match(/\b(A\d{3}-\d{2,3}\w?)\b/i);
+        if (m) raw.variant = m[1].toUpperCase();
+    } else if (raw.manufacturer === 'boeing') {
+        const m = searchText.match(/\b(\d{3}-\d{1,3}\w?)\b/);
+        if (m) raw.variant = m[1];
+    } else {
+        const m = searchText.match(/\b([A-Z]{1,3}\d{2,4}[-\/]\w+)\b/);
+        if (m) raw.variant = m[1];
+    }
+
+    // --- Urgency detection ---
+    const urgencyText = (
+        (raw.subject || '') + ' ' +
+        (raw.summary || '')
+    ).toLowerCase();
+    const isEmergency = /emergency\s+airworthiness\s+directive|emergency\s+ad|\bead\b/i.test(urgencyText);
+
+    let withinThirtyDays = false;
+    if (raw.effectiveDate && raw.publishDate) {
+        const pub  = new Date(raw.publishDate);
+        const eff  = new Date(raw.effectiveDate);
+        const diffDays = (eff - pub) / (1000 * 60 * 60 * 24);
+        withinThirtyDays = diffDays >= 0 && diffDays <= 30;
+    }
+
+    if (isEmergency || withinThirtyDays) {
+        raw.urgency = 'emergency';
+    } else if (raw.type === 'SB') {
+        raw.urgency = 'informational';
+    } else {
+        raw.urgency = 'standard';
+    }
+
+    // --- SB reference extraction ---
+    const sbMatches = (
+        (raw.subject || '') + ' ' + (raw.summary || '')
+    ).match(/SB\s+[A-Z0-9][\w.-]+/gi);
+    raw.referencedSBs = sbMatches ? [...new Set(sbMatches)] : [];
+
+    return raw;
+}
+
+// ===== CLASSIFICATION: CREATE STUB SB RECORDS FROM REFERENCES =====
+function createSBsFromReferences(directive, existingIds) {
+    const newSBs = [];
+    if (!directive.referencedSBs || !directive.referencedSBs.length) return newSBs;
+
+    for (const sbNumber of directive.referencedSBs) {
+        const id = `ref_sb_${hashString(sbNumber)}`;
+        if (existingIds.has(id)) continue;
+        existingIds.add(id);
+        newSBs.push({
+            id,
+            type: 'SB',
+            agency: directive.agency,
+            number: sbNumber,
+            manufacturer: directive.manufacturer,
+            family: directive.family,
+            variant: null,
+            subject: `Referenced in ${directive.number}: ${directive.subject}`,
+            summary: `Service Bulletin referenced by ${directive.agency.toUpperCase()} AD ${directive.number}`,
+            applicability: directive.applicability || '',
+            compliance: null,
+            effectiveDate: null,
+            publishDate: directive.publishDate,
+            urgency: 'informational',
+            referencedSBs: [],
+            sourceUrl: directive.sourceUrl,
+            fetchDate: directive.fetchDate
+        });
+    }
+    return newSBs;
+}
+
 // ===== HELPER: FILTER AND SORT DIRECTIVES =====
 function filterDirectives(directives, params) {
     let result = directives.slice();
@@ -325,6 +464,61 @@ const server = http.createServer(async (req, res) => {
             res.writeHead(500, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
             res.end(JSON.stringify({ error: err.message }));
         }
+        return;
+    }
+
+    // Route: POST /api/manual-add
+    if (req.method === 'POST' && url === '/api/manual-add') {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        req.on('end', () => {
+            try {
+                const data = JSON.parse(body);
+                const { number, manufacturer, family, subject, summary, sourceUrl } = data;
+                if (!number || !subject) {
+                    res.writeHead(400, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+                    res.end(JSON.stringify({ error: 'number and subject are required' }));
+                    return;
+                }
+                const id = `manual_sb_${hashString(number)}`;
+                const archive = getArchive();
+                // Deduplicate
+                if (archive.directives.some(d => d.id === id)) {
+                    res.writeHead(409, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+                    res.end(JSON.stringify({ error: 'SB already exists', id }));
+                    return;
+                }
+                const newSB = {
+                    id,
+                    type: 'SB',
+                    agency: 'manual',
+                    number,
+                    manufacturer: manufacturer || 'unknown',
+                    family: family || null,
+                    variant: null,
+                    subject,
+                    summary: summary || '',
+                    applicability: '',
+                    compliance: null,
+                    effectiveDate: null,
+                    publishDate: new Date().toISOString().slice(0, 10),
+                    urgency: 'informational',
+                    referencedSBs: [],
+                    sourceUrl: sourceUrl || '',
+                    fetchDate: new Date().toISOString()
+                };
+                archive.directives.push(newSB);
+                archive.metadata.totalRecords = archive.directives.length;
+                writeJSON(DATA_FILE, archive);
+                archiveCache = null; // invalidate cache
+                res.writeHead(201, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+                res.end(JSON.stringify({ success: true, id }));
+            } catch (err) {
+                console.error('[POST /api/manual-add] Error:', err.message);
+                res.writeHead(500, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+                res.end(JSON.stringify({ error: err.message }));
+            }
+        });
         return;
     }
 
