@@ -130,6 +130,55 @@ function serveFile(filePath, res) {
     });
 }
 
+// ===== HELPER: FILTER AND SORT DIRECTIVES =====
+function filterDirectives(directives, params) {
+    let result = directives.slice();
+
+    if (params.type) {
+        const types = params.type.split(',').map(t => t.trim().toLowerCase());
+        result = result.filter(d => types.includes((d.type || '').toLowerCase()));
+    }
+
+    if (params.agency) {
+        const agencies = params.agency.split(',').map(a => a.trim());
+        result = result.filter(d => agencies.includes(d.agency));
+    }
+
+    if (params.manufacturer) {
+        const manufacturers = params.manufacturer.split(',').map(m => m.trim());
+        result = result.filter(d => manufacturers.includes(d.manufacturer));
+    }
+
+    if (params.family) {
+        const families = params.family.split(',').map(f => f.trim().toLowerCase());
+        result = result.filter(d => families.includes((d.family || '').toLowerCase()));
+    }
+
+    if (params.urgency) {
+        const urgencies = params.urgency.split(',').map(u => u.trim());
+        result = result.filter(d => urgencies.includes(d.urgency));
+    }
+
+    if (params.dateFrom) {
+        result = result.filter(d => d.publishDate >= params.dateFrom);
+    }
+
+    if (params.dateTo) {
+        result = result.filter(d => d.publishDate <= params.dateTo);
+    }
+
+    if (params.search) {
+        const searchLower = params.search.toLowerCase();
+        result = result.filter(d =>
+            (d.number + ' ' + d.subject + ' ' + (d.summary || '')).toLowerCase().includes(searchLower)
+        );
+    }
+
+    result.sort((a, b) => (b.publishDate || '').localeCompare(a.publishDate || ''));
+
+    return result;
+}
+
 // ===== HTTP SERVER =====
 const server = http.createServer(async (req, res) => {
     // CORS preflight
@@ -161,6 +210,122 @@ const server = http.createServer(async (req, res) => {
                 return;
             }
         }
+    }
+
+    // Route: GET /api/directives
+    if (req.method === 'GET' && url === '/api/directives') {
+        try {
+            const parsedUrl = new URL(req.url, 'http://localhost');
+            const sp = parsedUrl.searchParams;
+            const params = {
+                type:         sp.get('type')         || null,
+                agency:       sp.get('agency')       || null,
+                manufacturer: sp.get('manufacturer') || null,
+                family:       sp.get('family')       || null,
+                urgency:      sp.get('urgency')      || null,
+                dateFrom:     sp.get('dateFrom')     || null,
+                dateTo:       sp.get('dateTo')       || null,
+                search:       sp.get('search')       || null
+            };
+            const page  = Math.max(1, parseInt(sp.get('page')  || '1',  10));
+            const limit = Math.max(1, parseInt(sp.get('limit') || '50', 10));
+
+            const archive  = getArchive();
+            const filtered = filterDirectives(archive.directives || [], params);
+            const total    = filtered.length;
+            const paginated = filtered.slice((page - 1) * limit, page * limit);
+
+            res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+            res.end(JSON.stringify({ total, page, limit, directives: paginated }));
+        } catch (err) {
+            console.error('[GET /api/directives] Error:', err.message);
+            res.writeHead(500, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+            res.end(JSON.stringify({ error: err.message }));
+        }
+        return;
+    }
+
+    // Route: GET /api/summary
+    if (req.method === 'GET' && url === '/api/summary') {
+        try {
+            const parsedUrl = new URL(req.url, 'http://localhost');
+            const sp = parsedUrl.searchParams;
+            const params = {
+                type:         sp.get('type')         || null,
+                agency:       sp.get('agency')       || null,
+                manufacturer: sp.get('manufacturer') || null,
+                family:       sp.get('family')       || null,
+                urgency:      sp.get('urgency')      || null,
+                dateFrom:     sp.get('dateFrom')     || null,
+                dateTo:       sp.get('dateTo')       || null,
+                search:       sp.get('search')       || null
+            };
+
+            const archive  = getArchive();
+            const filtered = filterDirectives(archive.directives || [], params);
+            const types    = loadTypes();
+
+            // Counts
+            const totalADs     = filtered.filter(d => d.type === 'AD').length;
+            const totalSBs     = filtered.filter(d => d.type === 'SB').length;
+            const emergencyADs = filtered.filter(d => d.urgency === 'emergency').length;
+
+            // New this month
+            const now        = new Date();
+            const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+            const newADsThisMonth       = filtered.filter(d => d.type === 'AD'          && d.publishDate >= monthStart).length;
+            const newEmergencyThisMonth = filtered.filter(d => d.urgency === 'emergency' && d.publishDate >= monthStart).length;
+
+            // By manufacturer — always include all keys with zero counts
+            const byManufacturer = {};
+            for (const key of Object.keys(types)) {
+                byManufacturer[key] = filtered.filter(d => d.manufacturer === key).length;
+            }
+
+            // By agency — always include all 3 with zero counts
+            const byAgency = { easa: 0, faa: 0, casa: 0 };
+            for (const d of filtered) {
+                if (byAgency.hasOwnProperty(d.agency)) byAgency[d.agency]++;
+            }
+
+            // By family — top 20 by count
+            const familyCounts = {};
+            for (const d of filtered) {
+                if (d.family) familyCounts[d.family] = (familyCounts[d.family] || 0) + 1;
+            }
+            const byFamily = Object.fromEntries(
+                Object.entries(familyCounts).sort((a, b) => b[1] - a[1]).slice(0, 20)
+            );
+
+            // Trend — last 12 months, one entry per month
+            const trend = [];
+            for (let i = 11; i >= 0; i--) {
+                const d         = new Date(now.getFullYear(), now.getMonth() - i, 1);
+                const monthStr  = d.toISOString().slice(0, 7); // "YYYY-MM"
+                const nextMonth = new Date(d.getFullYear(), d.getMonth() + 1, 1).toISOString().slice(0, 7);
+                const monthDirectives = filtered.filter(dir => dir.publishDate >= monthStr && dir.publishDate < nextMonth);
+                trend.push({
+                    month:   monthStr,
+                    adCount: monthDirectives.filter(dir => dir.type === 'AD').length,
+                    sbCount: monthDirectives.filter(dir => dir.type === 'SB').length
+                });
+            }
+
+            const summary = {
+                totalADs, totalSBs, emergencyADs,
+                newADsThisMonth, newEmergencyThisMonth,
+                byManufacturer, byAgency, byFamily, trend,
+                lastUpdate: archive.metadata ? archive.metadata.lastUpdate : null
+            };
+
+            res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+            res.end(JSON.stringify(summary));
+        } catch (err) {
+            console.error('[GET /api/summary] Error:', err.message);
+            res.writeHead(500, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+            res.end(JSON.stringify({ error: err.message }));
+        }
+        return;
     }
 
     // Default: 404
