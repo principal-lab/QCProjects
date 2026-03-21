@@ -1081,6 +1081,270 @@
             return p.toString();
         }
 
+        // ─── CHART RENDERERS ──────────────────────────────────────────────────────
+        function renderTrendChart() {
+            if (!STATE.summary || !STATE.summary.trend) return;
+
+            let trendData = STATE.summary.trend;
+            // Filter by STATE.trendMonths (6, 12, or 0 for all)
+            if (STATE.trendMonths > 0) {
+                trendData = trendData.slice(-STATE.trendMonths);
+            }
+
+            const labels = trendData.map(t => {
+                const d = new Date(t.month + '-01');
+                return d.toLocaleDateString('en-GB', { month: 'short', year: '2-digit' });
+            });
+            const data = trendData.map(t => t.adCount);
+
+            if (STATE.trendChartInstance) {
+                STATE.trendChartInstance.data.labels = labels;
+                STATE.trendChartInstance.data.datasets[0].data = data;
+                STATE.trendChartInstance.update('active');
+                return;
+            }
+
+            const ctx = document.getElementById('trendChart').getContext('2d');
+            STATE.trendChartInstance = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels,
+                    datasets: [{
+                        data,
+                        backgroundColor: '#2196f380',
+                        borderColor: '#2196f3',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: { duration: 300 },
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { grid: { color: '#1a2332' }, ticks: { color: '#8fadc8', font: { size: 10, family: 'Arial' } } },
+                        y: { grid: { color: '#1a2332' }, ticks: { color: '#8fadc8', font: { size: 10, family: 'Arial' } }, beginAtZero: true }
+                    }
+                }
+            });
+        }
+
+        document.querySelectorAll('.chart-toggles .toggle').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.chart-toggles .toggle').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                STATE.trendMonths = parseInt(btn.dataset.months) || 0;
+                renderTrendChart();
+            });
+        });
+
+        function renderManufacturerChart() {
+            if (!STATE.summary || !STATE.summary.byManufacturer) return;
+
+            // Sort manufacturers by count descending
+            const entries = Object.entries(STATE.summary.byManufacturer)
+                .sort((a, b) => b[1] - a[1]);
+
+            const labels = entries.map(([key]) => (MANUFACTURERS[key] || {}).label || key);
+            const data = entries.map(([, count]) => count);
+            const colours = entries.map(([key]) => (MANUFACTURERS[key] || {}).colour || '#666');
+            const mfrKeys = entries.map(([key]) => key);
+
+            if (STATE.manufacturerChartInstance) {
+                STATE.manufacturerChartInstance.data.labels = labels;
+                STATE.manufacturerChartInstance.data.datasets[0].data = data;
+                STATE.manufacturerChartInstance.data.datasets[0].backgroundColor = colours.map(c => c + '80');
+                STATE.manufacturerChartInstance.data.datasets[0].borderColor = colours;
+                STATE.manufacturerChartInstance.update('active');
+                return;
+            }
+
+            const ctx = document.getElementById('manufacturerChart').getContext('2d');
+            STATE.manufacturerChartInstance = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels,
+                    datasets: [{
+                        data,
+                        backgroundColor: colours.map(c => c + '80'),
+                        borderColor: colours,
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    indexAxis: 'y',
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: { duration: 300 },
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { grid: { color: '#1a2332' }, ticks: { color: '#8fadc8', font: { size: 10, family: 'Arial' } }, beginAtZero: true },
+                        y: { grid: { display: false }, ticks: { color: '#e0e0e0', font: { size: 11, family: 'Arial' } } }
+                    },
+                    onClick: (evt, elements) => {
+                        if (!elements.length) return;
+                        const idx = elements[0].index;
+                        const clickedMfr = mfrKeys[idx];
+                        if (STATE.filters.manufacturers.length === 1 && STATE.filters.manufacturers[0] === clickedMfr) {
+                            STATE.filters.manufacturers = [];
+                        } else {
+                            STATE.filters.manufacturers = [clickedMfr];
+                        }
+                        document.querySelectorAll('.filter-menu input[data-filter="manufacturer"]').forEach(cb => {
+                            cb.checked = STATE.filters.manufacturers.includes(cb.value);
+                        });
+                        updateFiltersFromDropdowns();
+                        loadDirectives();
+                        loadSummary();
+                    }
+                }
+            });
+        }
+
+        function renderAgencyChart() {
+            if (!STATE.summary || !STATE.summary.byAgency) return;
+
+            const agencyKeys = ['easa', 'faa', 'casa'];
+            const labels = agencyKeys.map(k => AGENCY_LABELS[k]);
+            const data = agencyKeys.map(k => STATE.summary.byAgency[k] || 0);
+            const colours = agencyKeys.map(k => AGENCY_COLOURS[k]);
+
+            if (STATE.agencyChartInstance) {
+                STATE.agencyChartInstance.data.datasets[0].data = data;
+                STATE.agencyChartInstance.update('active');
+                return;
+            }
+
+            const centreTextPlugin = {
+                id: 'centreText',
+                afterDraw(chart) {
+                    const { ctx, width, height } = chart;
+                    const total = chart.data.datasets[0].data.reduce((a, b) => a + b, 0);
+                    ctx.save();
+                    ctx.font = 'bold 16px Arial';
+                    ctx.fillStyle = '#e0e0e0';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(total.toLocaleString(), width / 2, height / 2);
+                    ctx.restore();
+                }
+            };
+
+            const ctx = document.getElementById('agencyChart').getContext('2d');
+            STATE.agencyChartInstance = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels,
+                    datasets: [{
+                        data,
+                        backgroundColor: colours,
+                        borderColor: '#111827',
+                        borderWidth: 2
+                    }]
+                },
+                plugins: [centreTextPlugin],
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: { duration: 300 },
+                    plugins: {
+                        legend: {
+                            position: 'right',
+                            labels: { color: '#e0e0e0', font: { size: 11, family: 'Arial' }, padding: 12 }
+                        }
+                    },
+                    onClick: (evt, elements) => {
+                        if (!elements.length) return;
+                        const idx = elements[0].index;
+                        const clickedAgency = agencyKeys[idx];
+                        if (STATE.filters.agencies.length === 1 && STATE.filters.agencies[0] === clickedAgency) {
+                            STATE.filters.agencies = [];
+                        } else {
+                            STATE.filters.agencies = [clickedAgency];
+                        }
+                        document.querySelectorAll('.filter-menu input[data-filter="agency"]').forEach(cb => {
+                            cb.checked = STATE.filters.agencies.includes(cb.value);
+                        });
+                        updateFiltersFromDropdowns();
+                        loadDirectives();
+                        loadSummary();
+                    }
+                }
+            });
+        }
+
+        function renderFamilyChart() {
+            if (!STATE.summary || !STATE.summary.byFamily) return;
+
+            const entries = Object.entries(STATE.summary.byFamily)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 8);
+
+            if (entries.length === 0) return;
+
+            const labels = entries.map(([family]) => family);
+            const data = entries.map(([, count]) => count);
+
+            // Map each family to its parent manufacturer colour
+            const colours = labels.map(family => {
+                for (const [, mfr] of Object.entries(MANUFACTURERS)) {
+                    if (mfr.families.includes(family)) return mfr.colour;
+                }
+                return '#666';
+            });
+
+            const familyKeys = entries.map(([family]) => family);
+
+            if (STATE.familyChartInstance) {
+                STATE.familyChartInstance.data.labels = labels;
+                STATE.familyChartInstance.data.datasets[0].data = data;
+                STATE.familyChartInstance.data.datasets[0].backgroundColor = colours.map(c => c + '80');
+                STATE.familyChartInstance.data.datasets[0].borderColor = colours;
+                STATE.familyChartInstance.update('active');
+                return;
+            }
+
+            const ctx = document.getElementById('familyChart').getContext('2d');
+            STATE.familyChartInstance = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels,
+                    datasets: [{
+                        data,
+                        backgroundColor: colours.map(c => c + '80'),
+                        borderColor: colours,
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: { duration: 300 },
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { grid: { display: false }, ticks: { color: '#e0e0e0', font: { size: 10, family: 'Arial' } } },
+                        y: { grid: { color: '#1a2332' }, ticks: { color: '#8fadc8', font: { size: 10, family: 'Arial' } }, beginAtZero: true }
+                    },
+                    onClick: (evt, elements) => {
+                        if (!elements.length) return;
+                        const idx = elements[0].index;
+                        const clickedFamily = familyKeys[idx];
+                        if (STATE.filters.families.length === 1 && STATE.filters.families[0] === clickedFamily) {
+                            STATE.filters.families = [];
+                        } else {
+                            STATE.filters.families = [clickedFamily];
+                        }
+                        document.querySelectorAll('.filter-menu input[data-filter="family"]').forEach(cb => {
+                            cb.checked = STATE.filters.families.includes(cb.value);
+                        });
+                        updateFiltersFromDropdowns();
+                        loadDirectives();
+                        loadSummary();
+                    }
+                }
+            });
+        }
+
         // ─── DATA LOADERS ─────────────────────────────────────────────────────────
         async function loadSummary() {
             const qs = buildQueryString();
