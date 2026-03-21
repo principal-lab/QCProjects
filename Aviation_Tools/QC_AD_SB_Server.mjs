@@ -318,6 +318,200 @@ function filterDirectives(directives, params) {
     return result;
 }
 
+// ===== EASA FETCHER =====
+async function fetchEASA(sourceConfig) {
+    const results = [];
+    try {
+        const searchUrl = `${sourceConfig.baseUrl}/ad/search`;
+        console.log(`[fetchEASA] Fetching ${searchUrl}`);
+        const html = await httpsGet(searchUrl, 20000);
+
+        // Extract AD numbers in format 20XX-XXXX or 20XX-XXXX-E (emergency)
+        const adPattern = /\b(20\d{2}-\d{4}(?:-[A-Z])?)\b/g;
+        const adNumbers = [...new Set(html.match(adPattern) || [])];
+        console.log(`[fetchEASA] Found ${adNumbers.length} AD number(s) in search page`);
+
+        // Extract rows from any table-like structure
+        // EASA pages vary, so we attempt multiple extraction strategies
+
+        // Strategy 1: look for anchor links to /ad/20XX-XXXX
+        const linkPattern = /href="\/ad\/(20\d{2}-\d{4}(?:-[A-Z])?)"/g;
+        let match;
+        const linkedADs = new Set();
+        while ((match = linkPattern.exec(html)) !== null) {
+            linkedADs.add(match[1]);
+        }
+
+        // Strategy 2: pull subject text near each AD number
+        // EASA HTML typically has: <td>20XX-XXXX</td><td>Subject text</td><td>TC Holder</td>
+        const rowPattern = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+        const cellPattern = /<td[^>]*>([\s\S]*?)<\/td>/gi;
+        const datePattern = /\b(\d{4}-\d{2}-\d{2})\b/;
+        const tagStripPattern = /<[^>]+>/g;
+
+        let rowMatch;
+        while ((rowMatch = rowPattern.exec(html)) !== null) {
+            const rowHtml = rowMatch[1];
+            const cells = [];
+            let cellMatch;
+            const cellRe = /<td[^>]*>([\s\S]*?)<\/td>/gi;
+            while ((cellMatch = cellRe.exec(rowHtml)) !== null) {
+                cells.push(cellMatch[1].replace(tagStripPattern, '').trim());
+            }
+            if (cells.length < 2) continue;
+
+            // Find which cell contains an AD number
+            let adNumber = null;
+            for (const cell of cells) {
+                const m = cell.match(/^(20\d{2}-\d{4}(?:-[A-Z])?)$/);
+                if (m) { adNumber = m[1]; break; }
+            }
+            if (!adNumber) continue;
+
+            const subject = cells.find((c, i) => cells.indexOf(c) !== cells.indexOf(adNumber) && c.length > 5) || '';
+            const tcHolder = cells.length >= 3 ? cells[2] : '';
+
+            // Try to find a date in any cell
+            let publishDate = null;
+            for (const cell of cells) {
+                const dm = cell.match(datePattern);
+                if (dm) { publishDate = dm[1]; break; }
+            }
+            if (!publishDate) publishDate = new Date().toISOString().slice(0, 10);
+
+            results.push({
+                number: adNumber,
+                subject: subject || `EASA AD ${adNumber}`,
+                summary: subject || `EASA AD ${adNumber}`,
+                applicability: tcHolder,
+                publishDate,
+                effectiveDate: publishDate,
+                sourceUrl: `https://ad.easa.europa.eu/ad/${adNumber}`
+            });
+        }
+
+        // If table strategy yielded nothing, fall back to bare AD numbers from links
+        if (results.length === 0 && linkedADs.size > 0) {
+            console.warn('[fetchEASA] Table parse yielded no rows — falling back to link list');
+            const today = new Date().toISOString().slice(0, 10);
+            for (const adNumber of linkedADs) {
+                results.push({
+                    number: adNumber,
+                    subject: `EASA AD ${adNumber}`,
+                    summary: `EASA AD ${adNumber}`,
+                    applicability: '',
+                    publishDate: today,
+                    effectiveDate: today,
+                    sourceUrl: `https://ad.easa.europa.eu/ad/${adNumber}`
+                });
+            }
+        }
+
+        // Deduplicate by AD number
+        const seen = new Set();
+        const deduped = [];
+        for (const r of results) {
+            if (!seen.has(r.number)) {
+                seen.add(r.number);
+                deduped.push(r);
+            }
+        }
+
+        console.log(`[fetchEASA] Returning ${deduped.length} directive(s)`);
+
+        if (sourceConfig.rateLimitMs) {
+            await new Promise(r => setTimeout(r, sourceConfig.rateLimitMs));
+        }
+
+        return deduped;
+    } catch (err) {
+        console.error('[fetchEASA] Error:', err.message);
+        return results; // return whatever partial results were obtained
+    }
+}
+
+// ===== FAA FETCHER (stub — implemented in Task 6) =====
+async function fetchFAA(sourceConfig) {
+    console.log('[fetchFAA] Not yet implemented');
+    return [];
+}
+
+// ===== CASA FETCHER (stub — implemented in Task 6) =====
+async function fetchCASA(sourceConfig) {
+    console.log('[fetchCASA] Not yet implemented');
+    return [];
+}
+
+// ===== UPDATE ORCHESTRATOR =====
+async function runUpdate() {
+    const sources = loadSources().sources || {};
+    const enabledSources = Object.entries(sources).filter(([_, cfg]) => cfg.enabled);
+    const total = enabledSources.length;
+    let completed = 0;
+    let totalNew = 0;
+
+    const archive = getArchive();
+    const existingIds = new Set((archive.directives || []).map(d => d.id));
+
+    for (const [agencyKey, sourceConfig] of enabledSources) {
+        broadcastSSE({ type: 'progress', agency: agencyKey, status: 'fetching', completed, total });
+
+        let rawResults = [];
+        try {
+            const fetchTimeout = new Promise((_, reject) =>
+                setTimeout(() => reject(new Error('Timeout')), 30000));
+
+            let fetchPromise;
+            if (agencyKey === 'easa')       fetchPromise = fetchEASA(sourceConfig);
+            else if (agencyKey === 'faa')   fetchPromise = fetchFAA(sourceConfig);
+            else if (agencyKey === 'casa')  fetchPromise = fetchCASA(sourceConfig);
+            else { completed++; continue; }
+
+            rawResults = await Promise.race([fetchPromise, fetchTimeout]);
+        } catch (err) {
+            console.error(`[update] ${agencyKey} fetch failed:`, err.message);
+            broadcastSSE({ type: 'progress', agency: agencyKey, status: 'error', message: err.message });
+            completed++;
+            continue;
+        }
+
+        let newCount = 0;
+        for (const raw of rawResults) {
+            raw.agency = agencyKey;
+            raw.fetchDate = new Date().toISOString();
+            classifyDirective(raw);
+
+            const id = `${agencyKey}_${raw.type || 'ad'}_${hashString(raw.number || raw.subject)}`;
+            raw.id = id;
+            if (!raw.type) raw.type = 'AD';
+
+            if (!existingIds.has(id)) {
+                existingIds.add(id);
+                archive.directives.push(raw);
+                newCount++;
+
+                // Create SB records from references
+                const newSBs = createSBsFromReferences(raw, existingIds);
+                archive.directives.push(...newSBs);
+                newCount += newSBs.length;
+            }
+        }
+
+        broadcastSSE({ type: 'progress', agency: agencyKey, status: 'complete', newCount });
+        totalNew += newCount;
+        completed++;
+    }
+
+    // Update metadata and save
+    archive.metadata.lastUpdate = new Date().toISOString();
+    archive.metadata.totalRecords = archive.directives.length;
+    writeJSON(DATA_FILE, archive);
+    archiveCache = null; // invalidate cache
+
+    broadcastSSE({ type: 'complete', totalNew, totalArchive: archive.directives.length });
+    console.log(`[update] Complete: ${totalNew} new, ${archive.directives.length} total`);
+}
+
 // ===== HTTP SERVER =====
 const server = http.createServer(async (req, res) => {
     // CORS preflight
@@ -518,6 +712,31 @@ const server = http.createServer(async (req, res) => {
                 res.writeHead(500, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
                 res.end(JSON.stringify({ error: err.message }));
             }
+        });
+        return;
+    }
+
+    // Route: GET /api/update-status  (SSE stream)
+    if (req.method === 'GET' && url === '/api/update-status') {
+        res.writeHead(200, {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'Access-Control-Allow-Origin': '*'
+        });
+        res.write('data: {"type":"connected"}\n\n');
+        sseClients.add(res);
+        req.on('close', () => sseClients.delete(res));
+        return;
+    }
+
+    // Route: POST /api/update  (trigger data refresh)
+    if (req.method === 'POST' && url === '/api/update') {
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+        res.end(JSON.stringify({ status: 'started' }));
+        runUpdate().catch(err => {
+            console.error('[update] Fatal error:', err.message);
+            broadcastSSE({ type: 'error', message: err.message });
         });
         return;
     }
