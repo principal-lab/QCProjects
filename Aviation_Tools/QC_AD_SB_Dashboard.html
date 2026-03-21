@@ -1,0 +1,1036 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QC AD/SB Intelligence Tracker</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+    <style>
+        :root {
+            --bg-primary: #0a0e1a;
+            --bg-card: #111827;
+            --bg-card-hover: #1a2332;
+            --bg-header: linear-gradient(135deg, #0d1b2a 0%, #1b2a4a 100%);
+            --text-primary: #e0e0e0;
+            --text-secondary: #8fadc8;
+            --accent-gold: #d4a843;
+            --accent-gold-dark: #b8922e;
+            --agency-easa: #1565c0;
+            --agency-faa: #e65100;
+            --agency-casa: #2e7d32;
+            --status-green: #4caf50;
+            --status-red: #f44336;
+            --status-amber: #ff9800;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            font-family: Arial, sans-serif;
+            margin: 0;
+            min-height: 100vh;
+        }
+
+        /* HEADER */
+        header {
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            background: var(--bg-header);
+            border-bottom: 2px solid var(--accent-gold);
+            padding: 12px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .header-left img {
+            height: 72px;
+        }
+
+        h1 {
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--accent-gold);
+            margin: 0;
+        }
+
+        .version {
+            font-size: 10px;
+            color: var(--text-secondary);
+        }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .last-update {
+            font-size: 11px;
+            color: var(--text-secondary);
+            margin-right: 8px;
+        }
+
+        /* BUTTONS */
+        .btn-primary {
+            background: linear-gradient(135deg, var(--accent-gold) 0%, var(--accent-gold-dark) 100%);
+            color: #000;
+            font-weight: 700;
+            font-size: 12px;
+            padding: 8px 16px;
+            border-radius: 4px;
+            border: none;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-family: Arial, sans-serif;
+            transition: transform 0.15s, box-shadow 0.15s;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(212, 168, 67, 0.3);
+        }
+
+        .btn-secondary {
+            background: transparent;
+            border: 1px solid var(--accent-gold);
+            color: var(--accent-gold);
+            font-size: 12px;
+            font-weight: 700;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-family: Arial, sans-serif;
+            transition: background 0.15s;
+        }
+
+        .btn-secondary:hover {
+            background: rgba(212, 168, 67, 0.1);
+        }
+
+        /* FILTER BAR */
+        .filter-bar {
+            background: #0d1117;
+            padding: 10px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #1a2332;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .filter-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .filter-dropdown {
+            position: relative;
+        }
+
+        .filter-btn {
+            background: transparent;
+            border: 1px solid #2a3a4a;
+            color: var(--text-secondary);
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            font-family: Arial, sans-serif;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            transition: border-color 0.15s;
+        }
+
+        .filter-btn:hover {
+            border-color: var(--accent-gold);
+        }
+
+        .filter-count {
+            font-size: 10px;
+            color: var(--accent-gold);
+            font-weight: 700;
+        }
+
+        .filter-menu {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            background: var(--bg-card);
+            border: 1px solid #2a3a4a;
+            border-radius: 4px;
+            padding: 8px;
+            z-index: 50;
+            min-width: 180px;
+            margin-top: 4px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+        }
+
+        .filter-menu label {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 6px;
+            font-size: 12px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            border-radius: 3px;
+        }
+
+        .filter-menu label:hover {
+            background: var(--bg-card-hover);
+        }
+
+        .filter-menu input[type="checkbox"] {
+            accent-color: var(--accent-gold);
+        }
+
+        .filter-date {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .filter-date input[type="date"] {
+            background: var(--bg-primary);
+            border: 1px solid #2a3a4a;
+            color: var(--text-secondary);
+            padding: 6px 10px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-family: Arial, sans-serif;
+        }
+
+        .date-sep {
+            color: var(--text-secondary);
+            font-size: 12px;
+        }
+
+        /* KPI ROW */
+        .kpi-row {
+            display: flex;
+            gap: 16px;
+            padding: 16px 20px;
+        }
+
+        .kpi-card {
+            flex: 1;
+            background: var(--bg-card);
+            padding: 16px;
+            border-radius: 8px;
+            border-left: 4px solid;
+            cursor: pointer;
+            transition: background 0.2s, transform 0.15s;
+        }
+
+        .kpi-card:hover {
+            background: var(--bg-card-hover);
+            transform: translateY(-1px);
+        }
+
+        .kpi-label {
+            color: var(--text-secondary);
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .kpi-value {
+            color: var(--text-primary);
+            font-size: 28px;
+            font-weight: 700;
+            margin-top: 4px;
+        }
+
+        .kpi-sub {
+            font-size: 10px;
+            color: var(--text-secondary);
+            margin-top: 2px;
+        }
+
+        /* MAIN BODY */
+        .main-body {
+            display: flex;
+            gap: 16px;
+            padding: 0 20px 16px;
+        }
+
+        .charts-column {
+            flex: 6;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .feed-column {
+            flex: 4;
+            display: flex;
+            flex-direction: column;
+            gap: 0;
+        }
+
+        /* CHART CARDS */
+        .chart-card {
+            background: var(--bg-card);
+            padding: 16px;
+            border-radius: 8px;
+        }
+
+        .chart-card h3 {
+            color: var(--text-primary);
+            font-size: 13px;
+            margin: 0 0 12px;
+        }
+
+        .chart-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .chart-header h3 {
+            margin: 0;
+        }
+
+        .chart-toggles {
+            display: flex;
+            gap: 4px;
+        }
+
+        .chart-toggles .toggle {
+            background: transparent;
+            border: 1px solid #2a3a4a;
+            color: var(--text-secondary);
+            padding: 4px 10px;
+            font-size: 11px;
+            cursor: pointer;
+            border-radius: 4px;
+            font-family: Arial, sans-serif;
+            transition: background 0.15s, color 0.15s;
+        }
+
+        .chart-toggles .toggle.active {
+            background: var(--accent-gold);
+            color: #000;
+            font-weight: 700;
+            border-color: var(--accent-gold);
+        }
+
+        /* CHART CANVAS WRAPPER */
+        .chart-canvas-wrap {
+            position: relative;
+            height: 180px;
+        }
+
+        .chart-row {
+            display: flex;
+            gap: 16px;
+        }
+
+        .chart-row .chart-card {
+            flex: 1;
+        }
+
+        /* AGENCY COLOUR INDICATORS */
+        .agency-easa { color: var(--agency-easa); }
+        .agency-faa  { color: var(--agency-faa); }
+        .agency-casa { color: var(--agency-casa); }
+
+        /* URGENCY */
+        .urgency-emergency {
+            background: rgba(244, 67, 54, 0.2);
+            color: var(--status-red);
+            font-size: 10px;
+            font-weight: 700;
+            padding: 2px 6px;
+            border-radius: 3px;
+            text-transform: uppercase;
+        }
+
+        /* CATEGORY TAGS */
+        .category-tag {
+            display: inline-block;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 9px;
+            font-weight: 600;
+        }
+
+        .category-tag.ad {
+            background: rgba(21, 101, 192, 0.2);
+            color: var(--agency-easa);
+        }
+
+        .category-tag.sb {
+            background: rgba(230, 81, 0, 0.2);
+            color: var(--agency-faa);
+        }
+
+        .category-tag.easa {
+            background: rgba(21, 101, 192, 0.2);
+            color: var(--agency-easa);
+        }
+
+        .category-tag.faa {
+            background: rgba(230, 81, 0, 0.2);
+            color: var(--agency-faa);
+        }
+
+        .category-tag.casa {
+            background: rgba(46, 125, 50, 0.2);
+            color: var(--agency-casa);
+        }
+
+        /* FEED */
+        .feed-header {
+            background: var(--bg-card);
+            padding: 12px 16px;
+            border-radius: 8px 8px 0 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .feed-header h3 {
+            font-size: 13px;
+            margin: 0;
+            color: var(--text-primary);
+            white-space: nowrap;
+        }
+
+        .feed-header-right {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        #feedSearch {
+            background: var(--bg-primary);
+            border: 1px solid #2a3a4a;
+            color: var(--text-primary);
+            padding: 6px 10px;
+            border-radius: 4px;
+            width: 160px;
+            font-size: 11px;
+            font-family: Arial, sans-serif;
+        }
+
+        #feedSearch::placeholder {
+            color: var(--text-secondary);
+        }
+
+        #feedCount {
+            font-size: 10px;
+            color: var(--text-secondary);
+            white-space: nowrap;
+        }
+
+        .feed-list {
+            background: var(--bg-card);
+            flex: 1;
+            overflow-y: auto;
+            max-height: calc(100vh - 380px);
+            padding: 0;
+        }
+
+        .feed-item {
+            padding: 12px 16px;
+            border-bottom: 1px solid #1a2332;
+            border-left: 3px solid #2a3a4a;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .feed-item:hover {
+            background: var(--bg-card-hover);
+        }
+
+        .feed-item.easa-border { border-left-color: var(--agency-easa); }
+        .feed-item.faa-border  { border-left-color: var(--agency-faa); }
+        .feed-item.casa-border { border-left-color: var(--agency-casa); }
+        .feed-item.emergency   { border-left-color: var(--status-red); }
+
+        .feed-item .feed-source {
+            font-size: 10px;
+            color: var(--accent-gold);
+            margin-bottom: 2px;
+        }
+
+        .feed-item .feed-title {
+            font-size: 12px;
+            color: var(--text-primary);
+            margin-bottom: 4px;
+            line-height: 1.4;
+        }
+
+        .feed-item .feed-tags {
+            display: flex;
+            gap: 4px;
+            flex-wrap: wrap;
+            margin-bottom: 2px;
+        }
+
+        .feed-item .feed-date {
+            font-size: 10px;
+            color: var(--text-secondary);
+            margin-top: 4px;
+        }
+
+        .feed-item .feed-body {
+            display: none;
+            font-size: 11px;
+            color: var(--text-secondary);
+            margin-top: 8px;
+            line-height: 1.5;
+        }
+
+        .feed-item.expanded .feed-body {
+            display: block;
+            padding-top: 8px;
+            border-top: 1px solid #1a2332;
+        }
+
+        .feed-item .feed-link {
+            color: #4fc3f7;
+            text-decoration: none;
+            font-size: 11px;
+        }
+
+        .feed-item .feed-link:hover {
+            text-decoration: underline;
+        }
+
+        /* FEED FOOTER */
+        .feed-footer {
+            background: var(--bg-card);
+            padding: 8px 16px;
+            border-radius: 0 0 8px 8px;
+            border-top: 1px solid #1a2332;
+            text-align: center;
+        }
+
+        /* EMPTY STATE */
+        .empty-state {
+            color: var(--text-secondary);
+            text-align: center;
+            padding: 40px 20px;
+            font-style: italic;
+            font-size: 13px;
+        }
+
+        /* WARNING BANNER */
+        .warning-banner {
+            background: rgba(244, 67, 54, 0.1);
+            border: 1px solid var(--status-red);
+            border-radius: 4px;
+            padding: 10px 16px;
+            margin: 0 20px 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 12px;
+            color: #ef9a9a;
+        }
+
+        .warning-banner .warning-dismiss {
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 16px;
+            padding: 0 4px;
+            line-height: 1;
+        }
+
+        .warning-banner .warning-dismiss:hover {
+            color: var(--text-primary);
+        }
+
+        /* MODAL */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 200;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-content {
+            background: var(--bg-card);
+            border-radius: 8px;
+            padding: 24px;
+            max-width: 500px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+
+        .modal-header h3 {
+            margin: 0;
+            color: var(--text-primary);
+            font-size: 15px;
+        }
+
+        .modal-close {
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 24px;
+            cursor: pointer;
+            line-height: 1;
+            padding: 0;
+        }
+
+        .modal-close:hover {
+            color: var(--text-primary);
+        }
+
+        .modal-body {
+            margin-bottom: 16px;
+        }
+
+        .modal-footer {
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+            padding-top: 12px;
+            border-top: 1px solid #2a3a4a;
+        }
+
+        /* FORM GROUPS */
+        .form-group {
+            margin-bottom: 12px;
+        }
+
+        .form-group label {
+            display: block;
+            color: var(--text-secondary);
+            font-size: 11px;
+            margin-bottom: 4px;
+        }
+
+        .form-group input,
+        .form-group textarea,
+        .form-group select {
+            width: 100%;
+            background: var(--bg-primary);
+            border: 1px solid #2a3a4a;
+            color: var(--text-primary);
+            padding: 8px;
+            border-radius: 4px;
+            font-family: Arial, sans-serif;
+            font-size: 12px;
+            box-sizing: border-box;
+        }
+
+        .form-group textarea {
+            resize: vertical;
+            min-height: 80px;
+        }
+
+        .form-group input::placeholder,
+        .form-group textarea::placeholder {
+            color: var(--text-secondary);
+        }
+
+        .form-group select option {
+            background: var(--bg-card);
+        }
+
+        /* UPDATE OVERLAY PROGRESS */
+        #updateProgress {
+            text-align: left;
+        }
+
+        .progress-item {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            padding: 6px 0;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .progress-item .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+
+        .progress-item .status-dot.fetching {
+            background: var(--status-amber);
+        }
+
+        .progress-item .status-dot.complete {
+            background: var(--status-green);
+        }
+
+        .progress-item .status-dot.error {
+            background: var(--status-red);
+        }
+
+        .progress-summary {
+            margin-top: 16px;
+            padding-top: 12px;
+            border-top: 1px solid #2a3a4a;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        /* SCROLLBAR */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--bg-primary);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #2a3a4a;
+            border-radius: 3px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #3a4a5a;
+        }
+
+        /* RESPONSIVE */
+        @media (max-width: 1200px) {
+            .main-body {
+                flex-direction: column;
+            }
+
+            .charts-column,
+            .feed-column {
+                flex: 1;
+            }
+
+            .feed-list {
+                max-height: 400px;
+            }
+
+            .chart-row {
+                flex-direction: column;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .kpi-row {
+                flex-wrap: wrap;
+            }
+
+            .kpi-card {
+                flex: 1 1 calc(50% - 8px);
+            }
+
+            .filter-bar {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+
+            .header-left img {
+                height: 48px;
+            }
+
+            h1 {
+                font-size: 15px;
+            }
+
+            #feedSearch {
+                width: 120px;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- HEADER -->
+    <header>
+        <div class="header-left">
+            <img src="QC_Logo_Small_241206.png" alt="QC">
+            <div>
+                <h1>AD/SB Intelligence Tracker</h1>
+                <div class="version">v1.0 &middot; QC Aviation Consulting</div>
+            </div>
+        </div>
+        <div class="header-right">
+            <span class="last-update" id="lastUpdateTime">Last update: &mdash;</span>
+            <button class="btn-primary" id="btnUpdate">&#9650; UPDATE</button>
+            <button class="btn-secondary" id="btnExportCharts">&#128202; Export Charts</button>
+        </div>
+    </header>
+
+    <!-- FILTER BAR -->
+    <div class="filter-bar">
+        <div class="filter-group">
+
+            <!-- Type filter -->
+            <div class="filter-dropdown" id="filterType">
+                <button class="filter-btn">Type <span class="filter-count" id="filterCountType"></span> &#9662;</button>
+                <div class="filter-menu" style="display:none">
+                    <label><input type="checkbox" data-filter="type" value="AD"> AD (Airworthiness Directive)</label>
+                    <label><input type="checkbox" data-filter="type" value="SB"> SB (Service Bulletin)</label>
+                </div>
+            </div>
+
+            <!-- Agency filter -->
+            <div class="filter-dropdown" id="filterAgency">
+                <button class="filter-btn">Agency <span class="filter-count" id="filterCountAgency"></span> &#9662;</button>
+                <div class="filter-menu" style="display:none">
+                    <label><input type="checkbox" data-filter="agency" value="EASA"> EASA</label>
+                    <label><input type="checkbox" data-filter="agency" value="FAA"> FAA</label>
+                    <label><input type="checkbox" data-filter="agency" value="CASA"> CASA</label>
+                </div>
+            </div>
+
+            <!-- Manufacturer filter -->
+            <div class="filter-dropdown" id="filterManufacturer">
+                <button class="filter-btn">Manufacturer <span class="filter-count" id="filterCountManufacturer"></span> &#9662;</button>
+                <div class="filter-menu" style="display:none">
+                    <label><input type="checkbox" data-filter="manufacturer" value="airbus"> Airbus</label>
+                    <label><input type="checkbox" data-filter="manufacturer" value="boeing"> Boeing</label>
+                    <label><input type="checkbox" data-filter="manufacturer" value="atr"> ATR</label>
+                    <label><input type="checkbox" data-filter="manufacturer" value="embraer"> Embraer</label>
+                    <label><input type="checkbox" data-filter="manufacturer" value="gulfstream"> Gulfstream</label>
+                    <label><input type="checkbox" data-filter="manufacturer" value="bombardier"> Bombardier</label>
+                    <label><input type="checkbox" data-filter="manufacturer" value="dassault"> Dassault Aviation</label>
+                    <label><input type="checkbox" data-filter="manufacturer" value="textron"> Textron Aviation</label>
+                    <label><input type="checkbox" data-filter="manufacturer" value="pilatus"> Pilatus Aircraft</label>
+                    <label><input type="checkbox" data-filter="manufacturer" value="honda"> Honda Aircraft Company</label>
+                </div>
+            </div>
+
+            <!-- Family filter -->
+            <div class="filter-dropdown" id="filterFamily">
+                <button class="filter-btn">Family <span class="filter-count" id="filterCountFamily"></span> &#9662;</button>
+                <div class="filter-menu" id="familyFilterMenu" style="display:none">
+                    <label style="color:var(--text-secondary);font-style:italic;cursor:default">Select manufacturer first</label>
+                </div>
+            </div>
+
+            <!-- Urgency filter -->
+            <div class="filter-dropdown" id="filterUrgency">
+                <button class="filter-btn">Urgency <span class="filter-count" id="filterCountUrgency"></span> &#9662;</button>
+                <div class="filter-menu" style="display:none">
+                    <label><input type="checkbox" data-filter="urgency" value="Emergency"> Emergency</label>
+                    <label><input type="checkbox" data-filter="urgency" value="Standard"> Standard</label>
+                    <label><input type="checkbox" data-filter="urgency" value="Informational"> Informational</label>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Date range -->
+        <div class="filter-date">
+            <input type="date" id="dateFrom" title="From date">
+            <span class="date-sep">to</span>
+            <input type="date" id="dateTo" title="To date">
+        </div>
+    </div>
+
+    <!-- KPI ROW -->
+    <div class="kpi-row">
+        <div class="kpi-card" style="border-left-color:#2196f3">
+            <div class="kpi-label">Total ADs</div>
+            <div class="kpi-value" id="kpiTotalADs">0</div>
+            <div class="kpi-sub" id="kpiNewADs"></div>
+        </div>
+        <div class="kpi-card" style="border-left-color:#ff9800">
+            <div class="kpi-label">Total SBs</div>
+            <div class="kpi-value" id="kpiTotalSBs">0</div>
+            <div class="kpi-sub">Referenced + Manual</div>
+        </div>
+        <div class="kpi-card" style="border-left-color:#f44336">
+            <div class="kpi-label">Emergency ADs</div>
+            <div class="kpi-value" id="kpiEmergencyADs" style="color:#f44336">0</div>
+            <div class="kpi-sub" id="kpiNewEmergency"></div>
+        </div>
+        <div class="kpi-card" style="border-left-color:#d4a843">
+            <div class="kpi-label">Manufacturers</div>
+            <div class="kpi-value">10</div>
+            <div class="kpi-sub">Tracked</div>
+        </div>
+    </div>
+
+    <!-- MAIN BODY -->
+    <div class="main-body">
+
+        <!-- LEFT: CHARTS COLUMN -->
+        <div class="charts-column">
+
+            <!-- Chart 1: AD Issuance Trend -->
+            <div class="chart-card">
+                <div class="chart-header">
+                    <h3>AD Issuance Trend</h3>
+                    <div class="chart-toggles">
+                        <button class="toggle active" data-period="6M">6M</button>
+                        <button class="toggle" data-period="1Y">1Y</button>
+                        <button class="toggle" data-period="ALL">ALL</button>
+                    </div>
+                </div>
+                <div class="chart-canvas-wrap">
+                    <canvas id="trendChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Chart 2: ADs by Manufacturer -->
+            <div class="chart-card">
+                <h3>ADs by Manufacturer</h3>
+                <div class="chart-canvas-wrap" style="height:260px">
+                    <canvas id="manufacturerChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Bottom row: Agency + Family -->
+            <div class="chart-row">
+                <div class="chart-card">
+                    <h3>ADs by Agency</h3>
+                    <div class="chart-canvas-wrap">
+                        <canvas id="agencyChart"></canvas>
+                    </div>
+                </div>
+                <div class="chart-card">
+                    <h3>ADs by Aircraft Family</h3>
+                    <div class="chart-canvas-wrap">
+                        <canvas id="familyChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- RIGHT: FEED COLUMN -->
+        <div class="feed-column">
+
+            <!-- Feed header -->
+            <div class="feed-header">
+                <div>
+                    <h3>AD/SB Feed <span id="feedCount"></span></h3>
+                </div>
+                <div class="feed-header-right">
+                    <input type="search" id="feedSearch" placeholder="&#128269; Search feed&hellip;">
+                    <button class="btn-secondary" id="btnAddSB">+ Add SB</button>
+                </div>
+            </div>
+
+            <!-- Feed list -->
+            <div id="feedList" class="feed-list">
+                <div class="empty-state">No items loaded &mdash; click UPDATE to fetch data.</div>
+            </div>
+
+            <!-- Load more -->
+            <div class="feed-footer">
+                <button class="btn-secondary" id="btnLoadMore" style="display:none;width:100%">Load More</button>
+            </div>
+
+        </div>
+
+    </div>
+
+    <!-- MANUAL ADD SB MODAL -->
+    <div id="manualAddModal" class="modal-overlay" style="display:none">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Add Service Bulletin</h3>
+                <button class="modal-close" id="closeManualAdd">&times;</button>
+            </div>
+            <div class="modal-body">
+
+                <div class="form-group">
+                    <label for="modalSBNumber">SB Number *</label>
+                    <input type="text" id="modalSBNumber" placeholder="e.g. A320-53-1234" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="modalManufacturer">Manufacturer *</label>
+                    <select id="modalManufacturer">
+                        <option value="">-- Select manufacturer --</option>
+                        <option value="airbus">Airbus</option>
+                        <option value="boeing">Boeing</option>
+                        <option value="atr">ATR</option>
+                        <option value="embraer">Embraer</option>
+                        <option value="gulfstream">Gulfstream</option>
+                        <option value="bombardier">Bombardier</option>
+                        <option value="dassault">Dassault Aviation</option>
+                        <option value="textron">Textron Aviation</option>
+                        <option value="pilatus">Pilatus Aircraft</option>
+                        <option value="honda">Honda Aircraft Company</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="modalFamily">Aircraft Family</label>
+                    <select id="modalFamily">
+                        <option value="">-- Select manufacturer first --</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="modalSubject">Subject *</label>
+                    <input type="text" id="modalSubject" placeholder="e.g. Wing spar inspection" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="modalSummary">Summary</label>
+                    <textarea id="modalSummary" placeholder="Brief description of the service bulletin&hellip;"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label for="modalSourceURL">Source URL</label>
+                    <input type="text" id="modalSourceURL" placeholder="https://...">
+                </div>
+
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary" id="cancelManualAdd">Cancel</button>
+                <button class="btn-primary" id="submitManualAdd">Add SB</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- UPDATE PROGRESS OVERLAY -->
+    <div id="updateOverlay" class="modal-overlay" style="display:none">
+        <div class="modal-content" style="max-width:400px">
+            <h3 style="color:var(--accent-gold);margin:0 0 16px">Updating Data Sources</h3>
+            <div id="updateProgress"></div>
+        </div>
+    </div>
+
+    <script>
+        // JavaScript will be added in Tasks 8-10
+    </script>
+
+</body>
+</html>
