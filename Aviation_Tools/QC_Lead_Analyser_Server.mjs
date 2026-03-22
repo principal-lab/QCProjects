@@ -67,9 +67,11 @@ function httpsGet(url, timeout = 15000) {
 function readJSON(filePath) {
     try {
         const raw = fs.readFileSync(filePath, 'utf8');
-        return JSON.parse(raw);
+        const data = JSON.parse(raw);
+        if (!data.leads) data.leads = [];
+        return data;
     } catch (err) {
-        return {};
+        return { leads: [] };
     }
 }
 
@@ -458,10 +460,12 @@ async function runScan(requestedRegions) {
         const items = parseRSSItems(xml);
         totalScanned += items.length;
 
+        let dbgNoRegion = 0, dbgWrongRegion = 0, dbgNotRelevant = 0;
         for (const item of items) {
             const region = classifyRegion(item.title, item.description);
-            if (!region || !requestedRegions.includes(region)) continue;
-            if (!isRelevant(item.title, item.description)) continue;
+            if (!region) { dbgNoRegion++; continue; }
+            if (!requestedRegions.includes(region)) { dbgWrongRegion++; continue; }
+            if (!isRelevant(item.title, item.description)) { dbgNotRelevant++; continue; }
 
             const id = 'lead_' + hashString((item.link || '') + item.title);
             if (isDuplicate(id, item.title, allStores)) continue;
@@ -485,6 +489,7 @@ async function runScan(requestedRegions) {
                 keywordHits,
             });
         }
+        console.log(`[scan] ${feed.name}: ${items.length} items, noRegion=${dbgNoRegion}, wrongRegion=${dbgWrongRegion}, notRelevant=${dbgNotRelevant}`);
     }
 
     // Fetch TendersOnTime
