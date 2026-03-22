@@ -540,6 +540,51 @@ async function runScan(requestedRegions) {
     return result;
 }
 
+// ===== CLAUDE API CALL =====
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
+
+function callClaudeAPI(systemPrompt, userPrompt) {
+    return new Promise((resolve, reject) => {
+        const body = JSON.stringify({
+            model: 'claude-sonnet-4-20250514',
+            max_tokens: 500,
+            system: systemPrompt,
+            messages: [{ role: 'user', content: userPrompt }],
+        });
+
+        const options = {
+            hostname: 'api.anthropic.com',
+            path: '/v1/messages',
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'x-api-key': ANTHROPIC_API_KEY,
+                'anthropic-version': '2023-06-01',
+                'Content-Length': Buffer.byteLength(body),
+            },
+        };
+
+        const req = https.request(options, (res) => {
+            let data = '';
+            res.on('data', chunk => data += chunk);
+            res.on('end', () => {
+                try {
+                    const parsed = JSON.parse(data);
+                    if (parsed.content && parsed.content[0]) {
+                        resolve(parsed.content[0].text);
+                    } else {
+                        reject(new Error('Unexpected API response: ' + data.substring(0, 200)));
+                    }
+                } catch (e) { reject(e); }
+            });
+        });
+
+        req.on('error', reject);
+        req.write(body);
+        req.end();
+    });
+}
+
 // ===== HTTP SERVER =====
 const server = http.createServer(async (req, res) => {
     // CORS preflight
@@ -626,6 +671,74 @@ const server = http.createServer(async (req, res) => {
             console.error('[scan] Fatal:', err.message);
             broadcastSSE({ stage: 'error', message: err.message });
         });
+        return;
+    }
+
+    // Route: POST /api/ai-assess — AI deep assessment of a lead
+    if (req.method === 'POST' && url === '/api/ai-assess') {
+        if (!ANTHROPIC_API_KEY) {
+            res.writeHead(400, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+            res.end(JSON.stringify({ error: 'ANTHROPIC_API_KEY not configured' }));
+            return;
+        }
+
+        const body = await parseBody(req);
+        const { leadId } = body;
+
+        const data = readJSON(DATA_FILE);
+        const keep = readJSON(KEEP_FILE);
+        let lead = (data.leads || []).find(l => l.id === leadId) || (keep.leads || []).find(l => l.id === leadId);
+
+        if (!lead) {
+            res.writeHead(404, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+            res.end(JSON.stringify({ error: 'Lead not found' }));
+            return;
+        }
+
+        const systemPrompt = `You are an aviation business development analyst for QC Aviation Group Pty Ltd, a flight operations consultancy. Assess the following news item as a potential business lead.
+
+QC Aviation offers these services:
+1. Airline Startup (domestic and international)
+2. Aircraft Entry Into Service
+3. Sourcing Aircraft (business jet and airline types)
+4. Airline Flight Training Consulting
+5. Flight Operations Management Consulting
+6. Flight Training Simulators (assessment, validation, installation)
+7. Airline Route Analysis
+8. Flight Operations Technology Consulting
+9. Auditing (internal, regulatory compliance, IOSA compliance)
+10. Flight Operations Manual Suite (construction, assessment, amendment)
+
+Respond with JSON only:
+{
+  "grade": "GREEN|YELLOW|AMBER",
+  "gradeLabel": "Good Fit|Possible Fit|Poor Fit",
+  "reasoning": "2-3 sentence explanation",
+  "matchedServices": ["service name", ...]
+}`;
+
+        const userPrompt = `Title: ${lead.headline}\nSource: ${lead.source}\nDate: ${lead.publishDate}\nDescription: ${lead.description}`;
+
+        try {
+            const responseText = await callClaudeAPI(systemPrompt, userPrompt);
+            const assessment = JSON.parse(responseText);
+
+            lead.grade = assessment.grade;
+            lead.gradeLabel = assessment.gradeLabel;
+            lead.reasoning = assessment.reasoning;
+            lead.matchedServices = assessment.matchedServices;
+            lead.assessmentSource = 'ai-assessed';
+
+            if ((data.leads || []).find(l => l.id === leadId)) { writeJSON(DATA_FILE, data); discoverCache = data; }
+            if ((keep.leads || []).find(l => l.id === leadId)) { writeJSON(KEEP_FILE, keep); keepCache = keep; }
+
+            res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+            res.end(JSON.stringify({ success: true, lead }));
+        } catch (err) {
+            console.error('[ai-assess] Error:', err.message);
+            res.writeHead(500, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+            res.end(JSON.stringify({ error: err.message }));
+        }
         return;
     }
 
