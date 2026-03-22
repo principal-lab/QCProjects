@@ -4,8 +4,1175 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>QC Lead Analyser</title>
+    <style>
+        :root {
+            --bg-primary: #0a0e1a;
+            --bg-card: #111827;
+            --bg-card-hover: #1a2332;
+            --bg-header: linear-gradient(135deg, #0d1b2a 0%, #1b2a4a 100%);
+            --text-primary: #e0e0e0;
+            --text-secondary: #8fadc8;
+            --accent-gold: #d4a843;
+            --accent-gold-dark: #b8922e;
+            --status-green: #4caf50;
+            --status-yellow: #ffc107;
+            --status-amber: #ff9800;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            font-family: Arial, sans-serif;
+            margin: 0;
+            min-height: 100vh;
+        }
+
+        /* HEADER */
+        header {
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            background: var(--bg-header);
+            border-bottom: 2px solid var(--accent-gold);
+            padding: 12px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .header-left img { height: 72px; }
+
+        h1 {
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--accent-gold);
+            margin: 0;
+        }
+
+        .version {
+            font-size: 10px;
+            color: var(--text-secondary);
+        }
+
+        .confidential {
+            background: #c0392b;
+            color: #fff;
+            font-size: 11px;
+            font-weight: 700;
+            padding: 4px 16px;
+            border-radius: 2px;
+            letter-spacing: 3px;
+            text-transform: uppercase;
+            position: absolute;
+            left: 50%;
+            transform: translateX(-50%);
+        }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        /* BUTTONS */
+        .btn-primary {
+            background: linear-gradient(135deg, var(--accent-gold) 0%, var(--accent-gold-dark) 100%);
+            color: #000;
+            font-weight: 700;
+            font-size: 12px;
+            padding: 8px 16px;
+            border-radius: 4px;
+            border: none;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-family: Arial, sans-serif;
+            transition: transform 0.15s, box-shadow 0.15s;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(212, 168, 67, 0.3);
+        }
+
+        .btn-secondary {
+            background: transparent;
+            border: 1px solid var(--accent-gold);
+            color: var(--accent-gold);
+            font-size: 12px;
+            font-weight: 700;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-family: Arial, sans-serif;
+            transition: background 0.15s;
+        }
+
+        .btn-secondary:hover {
+            background: rgba(212, 168, 67, 0.1);
+        }
+
+        /* TAB BAR */
+        .tab-bar {
+            display: flex;
+            background: #0d1117;
+            border-bottom: 1px solid #1a2332;
+            padding: 0 20px;
+        }
+
+        .tab {
+            padding: 10px 20px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            border-bottom: 2px solid transparent;
+            transition: color 0.2s, border-color 0.2s;
+            font-family: Arial, sans-serif;
+        }
+
+        .tab:hover { color: var(--text-primary); }
+
+        .tab.active {
+            color: var(--accent-gold);
+            border-bottom-color: var(--accent-gold);
+        }
+
+        .tab .count {
+            background: #1a2332;
+            color: var(--text-secondary);
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 10px;
+            margin-left: 6px;
+        }
+
+        .tab.active .count {
+            background: rgba(212, 168, 67, 0.2);
+            color: var(--accent-gold);
+        }
+
+        /* FILTER BAR */
+        .filter-bar {
+            background: #0d1117;
+            padding: 10px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #1a2332;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .filter-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .filter-label {
+            font-size: 11px;
+            color: var(--text-secondary);
+            font-weight: 600;
+        }
+
+        /* PILLS (regions + grades) */
+        .pill {
+            padding: 4px 12px;
+            border-radius: 16px;
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+            border: 1px solid var(--accent-gold);
+            background: transparent;
+            color: var(--accent-gold);
+            font-family: Arial, sans-serif;
+            transition: background 0.15s, color 0.15s;
+        }
+
+        .pill:hover { background: rgba(212, 168, 67, 0.15); }
+
+        .pill.active {
+            background: var(--accent-gold);
+            color: #000;
+        }
+
+        .grade-pill.green { border-color: var(--status-green); color: var(--status-green); }
+        .grade-pill.green.active { background: var(--status-green); color: #fff; }
+        .grade-pill.yellow { border-color: var(--status-yellow); color: var(--status-yellow); }
+        .grade-pill.yellow.active { background: var(--status-yellow); color: #000; }
+        .grade-pill.amber { border-color: var(--status-amber); color: var(--status-amber); }
+        .grade-pill.amber.active { background: var(--status-amber); color: #000; }
+        .grade-pill.all { border-color: var(--text-secondary); color: var(--text-secondary); }
+        .grade-pill.all.active { background: var(--text-secondary); color: #000; }
+
+        /* SORT DROPDOWN */
+        .sort-select {
+            background: #0d1117;
+            border: 1px solid #2a3a4a;
+            color: var(--text-primary);
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-family: Arial, sans-serif;
+        }
+
+        .last-scanned {
+            font-size: 10px;
+            color: var(--text-secondary);
+        }
+
+        /* CONTENT AREA */
+        #content {
+            padding: 16px 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        /* LEAD CARD */
+        .lead-card {
+            background: var(--bg-card);
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 12px;
+            border-left: 4px solid #555;
+            transition: background 0.15s;
+            cursor: context-menu;
+        }
+
+        .lead-card:hover { background: var(--bg-card-hover); }
+
+        .lead-card.grade-GREEN { border-left-color: var(--status-green); }
+        .lead-card.grade-YELLOW { border-left-color: var(--status-yellow); }
+        .lead-card.grade-AMBER { border-left-color: var(--status-amber); }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 6px;
+        }
+
+        .entity-name {
+            font-size: 14px;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+
+        .grade-badge {
+            font-size: 10px;
+            font-weight: 700;
+            padding: 2px 8px;
+            border-radius: 4px;
+            text-transform: uppercase;
+        }
+
+        .grade-badge.GREEN { background: rgba(76, 175, 80, 0.2); color: var(--status-green); }
+        .grade-badge.YELLOW { background: rgba(255, 193, 7, 0.2); color: var(--status-yellow); }
+        .grade-badge.AMBER { background: rgba(255, 152, 0, 0.2); color: var(--status-amber); }
+
+        .card-headline {
+            font-size: 11px;
+            color: var(--accent-gold);
+            margin-bottom: 6px;
+        }
+
+        .card-description {
+            font-size: 11px;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+            line-height: 1.4;
+        }
+
+        .card-reasoning {
+            border-top: 1px solid #1a2332;
+            padding-top: 8px;
+            margin-top: 8px;
+        }
+
+        .reasoning-label {
+            font-size: 9px;
+            font-weight: 700;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 4px;
+        }
+
+        .reasoning-text {
+            font-size: 10px;
+            color: var(--text-secondary);
+            line-height: 1.4;
+        }
+
+        .assessment-source {
+            font-size: 9px;
+            color: var(--text-secondary);
+            font-style: italic;
+            margin-top: 4px;
+        }
+
+        .service-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            margin-top: 8px;
+        }
+
+        .service-tag {
+            font-size: 9px;
+            padding: 2px 8px;
+            border-radius: 10px;
+            background: rgba(212, 168, 67, 0.15);
+            color: var(--accent-gold);
+            font-weight: 600;
+        }
+
+        .card-meta {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 8px;
+            font-size: 10px;
+            color: var(--text-secondary);
+        }
+
+        /* KEEP CARD EDITABLE FIELDS */
+        .keep-fields {
+            border-top: 1px solid #1a2332;
+            padding-top: 10px;
+            margin-top: 10px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+
+        .keep-field label {
+            font-size: 9px;
+            font-weight: 700;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            display: block;
+            margin-bottom: 2px;
+        }
+
+        .keep-field input,
+        .keep-field textarea {
+            background: #0d1117;
+            border: 1px solid #2a3a4a;
+            color: var(--text-primary);
+            padding: 6px 10px;
+            border-radius: 4px;
+            font-family: Arial, sans-serif;
+            font-size: 11px;
+            width: 100%;
+        }
+
+        .keep-field textarea {
+            min-height: 50px;
+            resize: vertical;
+        }
+
+        .keep-field.full-width { grid-column: 1 / -1; }
+
+        /* RECENT UPDATES */
+        .recent-updates {
+            border-top: 1px solid #1a2332;
+            padding-top: 8px;
+            margin-top: 10px;
+        }
+
+        .recent-updates h4 {
+            font-size: 10px;
+            color: var(--text-secondary);
+            margin: 0 0 6px 0;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .update-item {
+            font-size: 10px;
+            color: var(--text-secondary);
+            padding: 4px 0;
+            border-bottom: 1px solid #0d1117;
+        }
+
+        .update-item a { color: var(--accent-gold); text-decoration: none; }
+        .update-item a:hover { text-decoration: underline; }
+
+        /* COLLAPSIBLE REGION HEADERS (Keep tab) */
+        .region-group-header {
+            font-size: 13px;
+            font-weight: 700;
+            color: var(--accent-gold);
+            padding: 10px 0;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            border-bottom: 1px solid #1a2332;
+            margin-bottom: 8px;
+        }
+
+        .region-group-header .chevron {
+            transition: transform 0.2s;
+            font-size: 10px;
+        }
+
+        .region-group-header.collapsed .chevron {
+            transform: rotate(-90deg);
+        }
+
+        .region-group.collapsed .region-group-leads { display: none; }
+
+        /* CONTEXT MENU */
+        #contextMenu {
+            position: fixed;
+            background: #1a2332;
+            border: 1px solid #2a3a4a;
+            border-radius: 6px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            display: none;
+            min-width: 180px;
+            padding: 4px 0;
+        }
+
+        .ctx-item {
+            padding: 8px 16px;
+            font-size: 12px;
+            cursor: pointer;
+            color: var(--text-primary);
+            font-family: Arial, sans-serif;
+        }
+
+        .ctx-item:hover { background: rgba(212, 168, 67, 0.1); }
+        .ctx-item.disabled { opacity: 0.4; pointer-events: none; }
+        .ctx-item.danger { color: #f44336; }
+        .ctx-item.danger:hover { background: rgba(244, 67, 54, 0.1); }
+
+        .ctx-divider {
+            height: 1px;
+            background: #2a3a4a;
+            margin: 4px 0;
+        }
+
+        /* ARCHIVE MODAL */
+        #archiveModal {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.7);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 2000;
+        }
+
+        .modal-content {
+            background: #1a2332;
+            border: 1px solid #2a3a4a;
+            border-radius: 8px;
+            padding: 24px;
+            width: 420px;
+            max-width: 90%;
+        }
+
+        .modal-content h3 {
+            margin: 0 0 4px 0;
+            font-size: 16px;
+            color: var(--text-primary);
+        }
+
+        .modal-content .modal-headline {
+            font-size: 12px;
+            color: var(--accent-gold);
+            margin-bottom: 16px;
+        }
+
+        .modal-content textarea {
+            background: #0d1117;
+            border: 1px solid #2a3a4a;
+            color: var(--text-primary);
+            padding: 8px 10px;
+            border-radius: 4px;
+            font-family: Arial, sans-serif;
+            font-size: 11px;
+            width: 100%;
+            min-height: 80px;
+            resize: vertical;
+            margin-bottom: 16px;
+        }
+
+        .modal-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+        }
+
+        /* PROGRESS BAR */
+        #progressBar {
+            display: none;
+            background: #0d1117;
+            padding: 4px 20px 8px;
+        }
+
+        .bar-label {
+            font-size: 10px;
+            color: var(--text-secondary);
+            margin-bottom: 2px;
+        }
+
+        .bar-track {
+            height: 3px;
+            background: #1a2332;
+            border-radius: 2px;
+            overflow: hidden;
+        }
+
+        .bar-fill {
+            height: 100%;
+            background: var(--accent-gold);
+            width: 0%;
+            transition: width 0.3s;
+            border-radius: 2px;
+        }
+
+        /* TOAST */
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            padding: 10px 20px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            z-index: 10000;
+            animation: fadeIn 0.3s, fadeOut 0.3s 2.7s;
+            font-family: Arial, sans-serif;
+        }
+        .toast.success { background: #4caf50; color: #fff; }
+        .toast.error { background: #f44336; color: #fff; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes fadeOut { from { opacity: 1; } to { opacity: 0; } }
+
+        /* EMPTY STATE */
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: var(--text-secondary);
+            font-size: 13px;
+        }
+
+        /* ARCHIVE SEARCH */
+        .archive-search {
+            background: #0d1117;
+            border: 1px solid #2a3a4a;
+            color: var(--text-primary);
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-family: Arial, sans-serif;
+            font-size: 12px;
+            width: 100%;
+            max-width: 400px;
+            margin-bottom: 16px;
+        }
+    </style>
 </head>
 <body>
-    <h1>QC Lead Analyser</h1>
+    <header>
+        <div class="header-left">
+            <img src="/Branding_Assets/QC_Logo_Small_241206.png" alt="QC Aviation">
+            <div>
+                <h1>QC Lead Analyser</h1>
+                <div class="version">v1.0</div>
+            </div>
+        </div>
+        <span class="confidential">CONFIDENTIAL</span>
+        <div class="header-right">
+            <button class="btn-primary" id="updateBtn" onclick="handleUpdate()">Update</button>
+        </div>
+    </header>
+
+    <div class="tab-bar">
+        <div class="tab active" data-tab="discover" onclick="switchTab('discover')">Discover <span class="count">0</span></div>
+        <div class="tab" data-tab="keep" onclick="switchTab('keep')">Keep <span class="count">0</span></div>
+        <div class="tab" data-tab="archive" onclick="switchTab('archive')">Archive <span class="count">0</span></div>
+    </div>
+
+    <div class="filter-bar" id="filterBar">
+        <div class="filter-group">
+            <span class="filter-label">Regions:</span>
+            <div id="regionPills"></div>
+        </div>
+        <div class="filter-group">
+            <span class="filter-label">Grade:</span>
+            <div id="gradeFilter"></div>
+            <select class="sort-select" id="sortSelect" onchange="setSortBy(this.value)">
+                <option value="newest">Newest first</option>
+                <option value="grade">Grade (best first)</option>
+                <option value="entity">Entity A-Z</option>
+            </select>
+            <span class="last-scanned" id="lastScanned"></span>
+        </div>
+    </div>
+
+    <div id="progressBar">
+        <div class="bar-label"></div>
+        <div class="bar-track"><div class="bar-fill"></div></div>
+    </div>
+
+    <div id="content"></div>
+
+    <div id="contextMenu"></div>
+
+    <div id="archiveModal">
+        <div class="modal-content">
+            <h3>Archive: <span id="archiveEntity"></span></h3>
+            <div class="modal-headline" id="archiveHeadline"></div>
+            <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:6px;">Archive notes:</label>
+            <textarea id="archiveNotes" placeholder="Why is this lead being archived?"></textarea>
+            <div class="modal-actions">
+                <button class="btn-secondary" onclick="cancelArchive()">Cancel</button>
+                <button class="btn-primary" onclick="confirmArchive()">Archive</button>
+            </div>
+        </div>
+    </div>
+
+<script>
+// ===== STATE =====
+const state = {
+    activeTab: 'discover',
+    selectedRegions: new Set(['australia', 'oceania', 'se_asia', 'east_asia', 'central_asia', 'middle_east', 'europe']),
+    gradeFilter: 'ALL',
+    sortBy: 'newest',
+    discoverLeads: [],
+    keepLeads: [],
+    archiveLeads: [],
+    lastScanDate: null,
+    scanning: false,
+};
+
+// ===== API =====
+async function api(method, path, body) {
+    const opts = { method, headers: { 'Content-Type': 'application/json' } };
+    if (body) opts.body = JSON.stringify(body);
+    const res = await fetch(path, opts);
+    return res.json();
+}
+
+async function loadAllData() {
+    const [discover, keep, archive] = await Promise.all([
+        api('GET', '/api/discover'),
+        api('GET', '/api/keep'),
+        api('GET', '/api/archive'),
+    ]);
+    state.discoverLeads = discover.leads || [];
+    state.keepLeads = keep.leads || [];
+    state.archiveLeads = archive.leads || [];
+    state.lastScanDate = discover.lastScanDate || null;
+    updateLastScanned();
+    render();
+}
+
+// ===== SSE =====
+function connectSSE() {
+    const es = new EventSource('/events');
+    es.onmessage = (e) => {
+        const data = JSON.parse(e.data);
+        if (data.stage === 'fetching') {
+            updateProgress(data.source, data.progress);
+        } else if (data.stage === 'complete') {
+            hideProgress();
+            state.scanning = false;
+            loadAllData();
+        } else if (data.stage === 'error') {
+            hideProgress();
+            state.scanning = false;
+            showToast('Scan error: ' + data.message, 'error');
+        }
+    };
+}
+
+// ===== TAB SWITCHING =====
+function switchTab(tab) {
+    state.activeTab = tab;
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelector(`[data-tab="${tab}"]`).classList.add('active');
+    render();
+}
+
+// ===== REGION PILLS =====
+const REGION_LABELS = {
+    australia: 'Australia', oceania: 'Oceania', se_asia: 'South East Asia',
+    east_asia: 'East Asia', central_asia: 'Central Asia',
+    middle_east: 'Middle East', europe: 'Europe',
+};
+
+function renderRegionPills() {
+    const container = document.getElementById('regionPills');
+    container.innerHTML = Object.entries(REGION_LABELS).map(([key, label]) => {
+        const active = state.selectedRegions.has(key);
+        return `<button class="pill ${active ? 'active' : ''}" onclick="toggleRegion('${key}')">${label}</button>`;
+    }).join('');
+}
+
+function toggleRegion(region) {
+    if (state.selectedRegions.has(region)) {
+        state.selectedRegions.delete(region);
+    } else {
+        state.selectedRegions.add(region);
+    }
+    renderRegionPills();
+    render();
+}
+
+// ===== GRADE FILTER =====
+function renderGradeFilter() {
+    const container = document.getElementById('gradeFilter');
+    const grades = ['ALL', 'GREEN', 'YELLOW', 'AMBER'];
+    container.innerHTML = grades.map(g => {
+        const active = state.gradeFilter === g;
+        return `<button class="pill grade-pill ${g.toLowerCase()} ${active ? 'active' : ''}" onclick="setGradeFilter('${g}')">${g}</button>`;
+    }).join('');
+}
+
+function setGradeFilter(grade) {
+    state.gradeFilter = grade;
+    renderGradeFilter();
+    render();
+}
+
+function setSortBy(value) {
+    state.sortBy = value;
+    render();
+}
+
+// ===== FILTERING & SORTING =====
+function getFilteredLeads(leads) {
+    let filtered = leads.filter(l => state.selectedRegions.has(l.region));
+    if (state.gradeFilter !== 'ALL') {
+        filtered = filtered.filter(l => l.grade === state.gradeFilter);
+    }
+    if (state.sortBy === 'newest') {
+        filtered.sort((a, b) => (b.publishDate || '').localeCompare(a.publishDate || ''));
+    } else if (state.sortBy === 'grade') {
+        const order = { GREEN: 0, YELLOW: 1, AMBER: 2 };
+        filtered.sort((a, b) => (order[a.grade] || 3) - (order[b.grade] || 3));
+    } else if (state.sortBy === 'entity') {
+        filtered.sort((a, b) => (a.entity || '').localeCompare(b.entity || ''));
+    }
+    return filtered;
+}
+
+// ===== DATE FORMATTING =====
+function formatDate(dateStr) {
+    if (!dateStr) return '';
+    const d = new Date(dateStr);
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return String(d.getDate()).padStart(2, '0') + months[d.getMonth()] + d.getFullYear();
+}
+
+function updateLastScanned() {
+    const el = document.getElementById('lastScanned');
+    if (state.lastScanDate) {
+        el.textContent = 'Last scanned: ' + formatDate(state.lastScanDate);
+    } else {
+        el.textContent = '';
+    }
+}
+
+// ===== RENDER =====
+function render() {
+    updateTabCounts();
+    const content = document.getElementById('content');
+
+    if (state.activeTab === 'discover') {
+        renderDiscoverTab(content);
+    } else if (state.activeTab === 'keep') {
+        renderKeepTab(content);
+    } else if (state.activeTab === 'archive') {
+        renderArchiveTab(content);
+    }
+}
+
+function updateTabCounts() {
+    document.querySelector('[data-tab="discover"] .count').textContent = state.discoverLeads.length;
+    document.querySelector('[data-tab="keep"] .count').textContent = state.keepLeads.length;
+    document.querySelector('[data-tab="archive"] .count').textContent = state.archiveLeads.length;
+}
+
+// ===== DISCOVER TAB =====
+function renderDiscoverTab(container) {
+    const leads = getFilteredLeads(state.discoverLeads);
+    if (leads.length === 0) {
+        container.innerHTML = '<div class="empty-state">No leads found. Select regions and click Update to scan for leads.</div>';
+        return;
+    }
+    container.innerHTML = leads.map(l => renderLeadCard(l, 'discover')).join('');
+}
+
+function renderLeadCard(l, tab) {
+    const services = (l.matchedServices || []).map(s => `<span class="service-tag">${escHtml(s)}</span>`).join('');
+    return `<div class="lead-card grade-${l.grade}" oncontextmenu="showContextMenu(event, '${l.id}', '${tab}')">
+        <div class="card-header">
+            <span class="entity-name">${escHtml(l.entity)}</span>
+            <span class="grade-badge ${l.grade}">${escHtml(l.gradeLabel || l.grade)}</span>
+        </div>
+        <div class="card-headline">${escHtml(l.headline)}</div>
+        <div class="card-description">${escHtml(l.description || '')}</div>
+        <div class="card-reasoning">
+            <div class="reasoning-label">Assessment Reasoning</div>
+            <div class="reasoning-text">${escHtml(l.reasoning || '')}</div>
+            <div class="assessment-source">${l.assessmentSource === 'ai-assessed' ? 'AI-assessed' : 'Rule-based'}</div>
+        </div>
+        <div class="service-tags">${services}</div>
+        <div class="card-meta">
+            <span>${escHtml(l.source || '')}</span>
+            <span>${formatDate(l.publishDate)}</span>
+        </div>
+    </div>`;
+}
+
+// ===== KEEP TAB =====
+function renderKeepTab(container) {
+    const leads = getFilteredLeads(state.keepLeads);
+    if (leads.length === 0) {
+        container.innerHTML = '<div class="empty-state">No kept leads. Right-click a Discover lead and select Keep to add one.</div>';
+        return;
+    }
+
+    // Group by region
+    const grouped = {};
+    for (const l of leads) {
+        const region = l.region || 'unknown';
+        if (!grouped[region]) grouped[region] = [];
+        grouped[region].push(l);
+    }
+
+    let html = '';
+    for (const [region, regionLeads] of Object.entries(grouped)) {
+        const label = REGION_LABELS[region] || region;
+        html += `<div class="region-group" id="rg-${region}">
+            <div class="region-group-header" onclick="toggleRegionGroup('${region}')">
+                <span class="chevron">&#9660;</span> ${escHtml(label)} (${regionLeads.length})
+            </div>
+            <div class="region-group-leads">
+                ${regionLeads.map(l => renderKeepCard(l)).join('')}
+            </div>
+        </div>`;
+    }
+    container.innerHTML = html;
+}
+
+function renderKeepCard(l) {
+    const services = (l.matchedServices || []).map(s => `<span class="service-tag">${escHtml(s)}</span>`).join('');
+    let updatesHtml = '';
+    if (l.recentUpdates && l.recentUpdates.length > 0) {
+        const items = l.recentUpdates.slice(-5).reverse().map(u =>
+            `<div class="update-item">${formatDate(u.date)} &mdash; <a href="${escAttr(u.url)}" target="_blank">${escHtml(u.headline)}</a> (${escHtml(u.source)})</div>`
+        ).join('');
+        updatesHtml = `<div class="recent-updates"><h4>Recent Updates</h4>${items}</div>`;
+    }
+
+    return `<div class="lead-card grade-${l.grade}" oncontextmenu="showContextMenu(event, '${l.id}', 'keep')">
+        <div class="card-header">
+            <span class="entity-name">${escHtml(l.entity)}</span>
+            <span class="grade-badge ${l.grade}">${escHtml(l.gradeLabel || l.grade)}</span>
+        </div>
+        <div class="card-headline">${escHtml(l.headline)}</div>
+        <div class="card-description">${escHtml(l.description || '')}</div>
+        <div class="card-reasoning">
+            <div class="reasoning-label">Assessment Reasoning</div>
+            <div class="reasoning-text">${escHtml(l.reasoning || '')}</div>
+            <div class="assessment-source">${l.assessmentSource === 'ai-assessed' ? 'AI-assessed' : 'Rule-based'}</div>
+        </div>
+        <div class="service-tags">${services}</div>
+        <div class="keep-fields">
+            <div class="keep-field">
+                <label>Website</label>
+                <input value="${escAttr(l.website || '')}" onblur="saveKeepField('${l.id}', 'website', this.value)">
+            </div>
+            <div class="keep-field">
+                <label>Contact Name</label>
+                <input value="${escAttr(l.contactName || '')}" onblur="saveKeepField('${l.id}', 'contactName', this.value)">
+            </div>
+            <div class="keep-field">
+                <label>Email</label>
+                <input value="${escAttr(l.contactEmail || '')}" onblur="saveKeepField('${l.id}', 'contactEmail', this.value)">
+            </div>
+            <div class="keep-field">
+                <label>Phone</label>
+                <input value="${escAttr(l.contactPhone || '')}" onblur="saveKeepField('${l.id}', 'contactPhone', this.value)">
+            </div>
+            <div class="keep-field">
+                <label>LinkedIn</label>
+                <input value="${escAttr(l.linkedin || '')}" onblur="saveKeepField('${l.id}', 'linkedin', this.value)">
+            </div>
+            <div class="keep-field full-width">
+                <label>Notes</label>
+                <textarea onblur="saveKeepField('${l.id}', 'notes', this.value)">${escHtml(l.notes || '')}</textarea>
+            </div>
+        </div>
+        ${updatesHtml}
+        <div class="card-meta">
+            <span>Kept: ${formatDate(l.keptDate)}</span>
+            <span>${escHtml(l.source || '')} &mdash; ${formatDate(l.publishDate)}</span>
+        </div>
+    </div>`;
+}
+
+// ===== ARCHIVE TAB =====
+let archiveSearchText = '';
+
+function renderArchiveTab(container) {
+    let leads = state.archiveLeads;
+    if (archiveSearchText) {
+        const q = archiveSearchText.toLowerCase();
+        leads = leads.filter(l =>
+            (l.entity || '').toLowerCase().includes(q) ||
+            (l.region || '').toLowerCase().includes(q) ||
+            (l.archiveNotes || '').toLowerCase().includes(q) ||
+            (l.headline || '').toLowerCase().includes(q)
+        );
+    }
+    let html = `<input class="archive-search" placeholder="Search archived leads..." value="${escAttr(archiveSearchText)}" oninput="archiveSearchText=this.value; renderArchiveTab(document.getElementById('content'));">`;
+    if (leads.length === 0) {
+        html += '<div class="empty-state">No archived leads found.</div>';
+    } else {
+        html += leads.map(l => `<div class="lead-card grade-${l.grade}" oncontextmenu="showContextMenu(event, '${l.id}', 'archive')">
+            <div class="card-header">
+                <span class="entity-name">${escHtml(l.entity)}</span>
+                <span class="grade-badge ${l.grade}">${escHtml(l.gradeLabel || l.grade)}</span>
+            </div>
+            <div class="card-headline">${escHtml(l.headline)}</div>
+            <div class="card-meta">
+                <span>Archived: ${formatDate(l.archiveDate)}</span>
+                <span>${escHtml(l.source || '')}</span>
+            </div>
+            ${l.archiveNotes ? `<div class="card-description" style="margin-top:6px;font-style:italic;">Notes: ${escHtml(l.archiveNotes)}</div>` : ''}
+        </div>`).join('');
+    }
+    container.innerHTML = html;
+}
+
+// ===== KEEP FIELD SAVE (debounced) =====
+const saveTimers = {};
+function saveKeepField(leadId, field, value) {
+    const key = leadId + '_' + field;
+    clearTimeout(saveTimers[key]);
+    saveTimers[key] = setTimeout(() => {
+        api('PUT', `/api/keep/${leadId}`, { [field]: value });
+    }, 500);
+}
+
+// ===== COLLAPSIBLE REGION GROUPS =====
+function toggleRegionGroup(region) {
+    const group = document.getElementById('rg-' + region);
+    if (!group) return;
+    group.classList.toggle('collapsed');
+    const header = group.querySelector('.region-group-header');
+    if (header) header.classList.toggle('collapsed');
+}
+
+// ===== CONTEXT MENU =====
+let contextTarget = null;
+
+function showContextMenu(e, leadId, tab) {
+    e.preventDefault();
+    contextTarget = { leadId, tab };
+    const menu = document.getElementById('contextMenu');
+
+    let items = '';
+    if (tab === 'discover') {
+        items = `
+            <div class="ctx-item" onclick="doKeep()">&#10003; Keep</div>
+            <div class="ctx-item" onclick="doArchivePrompt()">&#128230; Archive</div>
+            <div class="ctx-divider"></div>
+            <div class="ctx-item ${window.ANTHROPIC_API_KEY ? '' : 'disabled'}" onclick="doAIAssess()">&#128269; AI Deep Assess</div>
+        `;
+    } else if (tab === 'keep') {
+        items = `
+            <div class="ctx-item" onclick="doArchivePrompt()">&#128230; Archive</div>
+            <div class="ctx-item ${window.ANTHROPIC_API_KEY ? '' : 'disabled'}" onclick="doAIAssess()">&#128269; AI Deep Assess</div>
+            <div class="ctx-divider"></div>
+            <div class="ctx-item" onclick="doOpenWebsite()">&#127760; Open Website</div>
+        `;
+    } else if (tab === 'archive') {
+        items = `
+            <div class="ctx-item" onclick="doRestore()">&#8617; Restore to Keep</div>
+            <div class="ctx-item danger" onclick="doDeletePermanent()">&#128465; Delete Permanently</div>
+        `;
+    }
+
+    menu.innerHTML = items;
+    menu.style.display = 'block';
+    menu.style.left = e.clientX + 'px';
+    menu.style.top = e.clientY + 'px';
+}
+
+function hideContextMenu() {
+    document.getElementById('contextMenu').style.display = 'none';
+}
+
+document.addEventListener('click', hideContextMenu);
+
+// ===== ARCHIVE MODAL =====
+function doArchivePrompt() {
+    hideContextMenu();
+    const lead = findLeadById(contextTarget.leadId);
+    document.getElementById('archiveEntity').textContent = lead ? lead.entity : '';
+    document.getElementById('archiveHeadline').textContent = lead ? lead.headline : '';
+    document.getElementById('archiveNotes').value = '';
+    document.getElementById('archiveModal').style.display = 'flex';
+}
+
+function confirmArchive() {
+    const notes = document.getElementById('archiveNotes').value;
+    api('POST', '/api/archive', { leadId: contextTarget.leadId, notes }).then(() => {
+        document.getElementById('archiveModal').style.display = 'none';
+        loadAllData();
+    });
+}
+
+function cancelArchive() {
+    document.getElementById('archiveModal').style.display = 'none';
+}
+
+// ===== ACTIONS =====
+async function doKeep() {
+    hideContextMenu();
+    await api('POST', '/api/keep', { leadId: contextTarget.leadId });
+    loadAllData();
+    showToast('Lead moved to Keep');
+}
+
+async function doAIAssess() {
+    hideContextMenu();
+    if (!window.ANTHROPIC_API_KEY) return;
+    showToast('AI assessment in progress...');
+    const result = await api('POST', '/api/ai-assess', { leadId: contextTarget.leadId });
+    if (result.success) {
+        showToast('AI assessment complete');
+        loadAllData();
+    } else {
+        showToast('AI assessment failed: ' + result.error, 'error');
+    }
+}
+
+async function doRestore() {
+    hideContextMenu();
+    await api('POST', '/api/restore', { leadId: contextTarget.leadId });
+    loadAllData();
+    showToast('Lead restored to Keep');
+}
+
+async function doDeletePermanent() {
+    hideContextMenu();
+    if (!confirm('Permanently delete this lead?')) return;
+    await api('DELETE', `/api/archive/${contextTarget.leadId}`);
+    loadAllData();
+    showToast('Lead deleted');
+}
+
+function doOpenWebsite() {
+    hideContextMenu();
+    const lead = state.keepLeads.find(l => l.id === contextTarget.leadId);
+    if (lead && lead.website) {
+        window.open(lead.website, '_blank');
+    } else {
+        showToast('No website URL set for this lead', 'error');
+    }
+}
+
+// ===== TOAST =====
+function showToast(message, type = 'success') {
+    const toast = document.createElement('div');
+    toast.className = 'toast ' + type;
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 3000);
+}
+
+// ===== PROGRESS BAR =====
+function showProgress() {
+    document.getElementById('progressBar').style.display = 'block';
+}
+
+function updateProgress(source, progress) {
+    const bar = document.getElementById('progressBar');
+    bar.style.display = 'block';
+    bar.querySelector('.bar-fill').style.width = (progress * 100) + '%';
+    bar.querySelector('.bar-label').textContent = 'Scanning: ' + source;
+}
+
+function hideProgress() {
+    document.getElementById('progressBar').style.display = 'none';
+}
+
+// ===== UPDATE BUTTON =====
+function handleUpdate() {
+    if (state.activeTab === 'keep') {
+        triggerKeepUpdate();
+    } else {
+        triggerScan();
+    }
+}
+
+async function triggerScan() {
+    if (state.scanning) return;
+    state.scanning = true;
+    showProgress();
+    const regions = [...state.selectedRegions];
+    await api('POST', '/api/scan', { regions });
+}
+
+async function triggerKeepUpdate() {
+    if (state.scanning) return;
+    state.scanning = true;
+    showProgress();
+    await api('POST', '/api/keep/update');
+}
+
+// ===== HELPERS =====
+function findLeadById(id) {
+    return state.discoverLeads.find(l => l.id === id)
+        || state.keepLeads.find(l => l.id === id)
+        || state.archiveLeads.find(l => l.id === id);
+}
+
+function escHtml(str) {
+    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function escAttr(str) {
+    return String(str).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// ===== INIT =====
+async function init() {
+    const config = await api('GET', '/api/config');
+    window.ANTHROPIC_API_KEY = config.aiEnabled;
+    connectSSE();
+    await loadAllData();
+    renderRegionPills();
+    renderGradeFilter();
+}
+
+document.addEventListener('DOMContentLoaded', init);
+</script>
 </body>
 </html>
