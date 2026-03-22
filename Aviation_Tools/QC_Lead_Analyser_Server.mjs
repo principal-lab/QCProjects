@@ -629,6 +629,217 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
+    // Route: POST /api/keep — move lead from Discover to Keep
+    if (req.method === 'POST' && url === '/api/keep') {
+        const body = await parseBody(req);
+        const { leadId } = body;
+        const data = readJSON(DATA_FILE);
+        const idx = (data.leads || []).findIndex(l => l.id === leadId);
+        if (idx === -1) {
+            res.writeHead(404, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+            res.end(JSON.stringify({ error: 'Lead not found in Discover' }));
+            return;
+        }
+        const lead = data.leads.splice(idx, 1)[0];
+        // Best-effort website extraction — use sourceUrl if it looks like an entity domain (not a news site)
+        const newsSites = ['aerotime', 'aviationweek', 'flightglobal', 'ch-aviation', 'simpleflying', 'aviationbusinessme', 'australianaviation', 'airwaysmag', 'casa.gov', 'easa.europa', 'tendersontime'];
+        let website = '';
+        try {
+            const domain = new URL(lead.sourceUrl).hostname.toLowerCase();
+            if (!newsSites.some(ns => domain.includes(ns))) website = lead.sourceUrl;
+        } catch (_) {}
+        Object.assign(lead, {
+            keptDate: new Date().toISOString(),
+            website,
+            contactName: '', contactEmail: '', contactPhone: '', linkedin: '', notes: '',
+            recentUpdates: [],
+        });
+        const keep = readJSON(KEEP_FILE);
+        if (!keep.leads) keep.leads = [];
+        keep.leads.push(lead);
+        writeJSON(DATA_FILE, data);
+        writeJSON(KEEP_FILE, keep);
+        discoverCache = data;
+        keepCache = keep;
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+        res.end(JSON.stringify(lead));
+        return;
+    }
+
+    // Route: POST /api/archive — move lead to Archive
+    if (req.method === 'POST' && url === '/api/archive') {
+        const body = await parseBody(req);
+        const { leadId, notes } = body;
+        const data = readJSON(DATA_FILE);
+        const keep = readJSON(KEEP_FILE);
+        let lead = null;
+        let source = null;
+        const dIdx = (data.leads || []).findIndex(l => l.id === leadId);
+        if (dIdx !== -1) {
+            lead = data.leads.splice(dIdx, 1)[0];
+            source = 'discover';
+        } else {
+            const kIdx = (keep.leads || []).findIndex(l => l.id === leadId);
+            if (kIdx !== -1) {
+                lead = keep.leads.splice(kIdx, 1)[0];
+                source = 'keep';
+            }
+        }
+        if (!lead) {
+            res.writeHead(404, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+            res.end(JSON.stringify({ error: 'Lead not found' }));
+            return;
+        }
+        lead.archiveDate = new Date().toISOString();
+        lead.archiveNotes = notes || '';
+        const archive = readJSON(ARCHIVE_FILE);
+        if (!archive.leads) archive.leads = [];
+        archive.leads.push(lead);
+        if (source === 'discover') { writeJSON(DATA_FILE, data); discoverCache = data; }
+        if (source === 'keep') { writeJSON(KEEP_FILE, keep); keepCache = keep; }
+        writeJSON(ARCHIVE_FILE, archive);
+        archiveCache = archive;
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+        res.end(JSON.stringify({ success: true }));
+        return;
+    }
+
+    // Route: PUT /api/keep/:id — update Keep lead editable fields
+    const keepMatch = url.match(/^\/api\/keep\/(.+)$/);
+    if (req.method === 'PUT' && keepMatch) {
+        const leadId = decodeURIComponent(keepMatch[1]);
+        const body = await parseBody(req);
+        const keep = readJSON(KEEP_FILE);
+        const lead = (keep.leads || []).find(l => l.id === leadId);
+        if (!lead) {
+            res.writeHead(404, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+            res.end(JSON.stringify({ error: 'Lead not found in Keep' }));
+            return;
+        }
+        const editable = ['website', 'contactName', 'contactEmail', 'contactPhone', 'linkedin', 'notes'];
+        for (const field of editable) {
+            if (body[field] !== undefined) lead[field] = body[field];
+        }
+        writeJSON(KEEP_FILE, keep);
+        keepCache = keep;
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+        res.end(JSON.stringify(lead));
+        return;
+    }
+
+    // Route: POST /api/restore — restore archived lead to Keep
+    if (req.method === 'POST' && url === '/api/restore') {
+        const body = await parseBody(req);
+        const { leadId } = body;
+        const archive = readJSON(ARCHIVE_FILE);
+        const idx = (archive.leads || []).findIndex(l => l.id === leadId);
+        if (idx === -1) {
+            res.writeHead(404, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+            res.end(JSON.stringify({ error: 'Lead not found in Archive' }));
+            return;
+        }
+        const lead = archive.leads.splice(idx, 1)[0];
+        delete lead.archiveDate;
+        delete lead.archiveNotes;
+        Object.assign(lead, {
+            keptDate: new Date().toISOString(),
+            website: lead.website || '',
+            contactName: lead.contactName || '', contactEmail: lead.contactEmail || '',
+            contactPhone: lead.contactPhone || '', linkedin: lead.linkedin || '',
+            notes: lead.notes || '', recentUpdates: lead.recentUpdates || [],
+        });
+        const keep = readJSON(KEEP_FILE);
+        if (!keep.leads) keep.leads = [];
+        keep.leads.push(lead);
+        writeJSON(ARCHIVE_FILE, archive);
+        writeJSON(KEEP_FILE, keep);
+        archiveCache = archive;
+        keepCache = keep;
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+        res.end(JSON.stringify({ success: true }));
+        return;
+    }
+
+    // Route: DELETE /api/archive/:id — permanently delete archived lead
+    const archiveMatch = url.match(/^\/api\/archive\/(.+)$/);
+    if (req.method === 'DELETE' && archiveMatch) {
+        const leadId = decodeURIComponent(archiveMatch[1]);
+        const archive = readJSON(ARCHIVE_FILE);
+        const idx = (archive.leads || []).findIndex(l => l.id === leadId);
+        if (idx === -1) {
+            res.writeHead(404, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+            res.end(JSON.stringify({ error: 'Lead not found in Archive' }));
+            return;
+        }
+        archive.leads.splice(idx, 1);
+        writeJSON(ARCHIVE_FILE, archive);
+        archiveCache = archive;
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+        res.end(JSON.stringify({ success: true }));
+        return;
+    }
+
+    // Route: POST /api/keep/update — re-scan feeds for kept entity updates
+    if (req.method === 'POST' && url === '/api/keep/update') {
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+        res.end(JSON.stringify({ status: 'started' }));
+
+        (async () => {
+            try {
+                const keep = readJSON(KEEP_FILE);
+                if (!keep.leads || keep.leads.length === 0) {
+                    broadcastSSE({ stage: 'complete', message: 'No kept leads to update' });
+                    return;
+                }
+                const entityNames = keep.leads.map(l => l.entity.toLowerCase());
+                const total = RSS_FEEDS.length;
+                let completed = 0;
+                let updatesFound = 0;
+
+                const feedPromises = RSS_FEEDS.map(feed =>
+                    httpsGet(feed.url, 15000)
+                        .then(xml => ({ feed, xml, error: null }))
+                        .catch(err => ({ feed, xml: null, error: err }))
+                );
+                const feedResults = await Promise.all(feedPromises);
+
+                for (const { feed, xml, error } of feedResults) {
+                    completed++;
+                    broadcastSSE({ stage: 'fetching', source: feed.name, progress: completed / total });
+                    if (error || !xml) continue;
+
+                    const items = parseRSSItems(xml);
+                    for (const item of items) {
+                        const text = (item.title + ' ' + item.description).toLowerCase();
+                        for (const lead of keep.leads) {
+                            if (text.includes(lead.entity.toLowerCase())) {
+                                if (!lead.recentUpdates) lead.recentUpdates = [];
+                                const url = item.link || '';
+                                if (lead.recentUpdates.some(u => u.url === url)) continue;
+                                lead.recentUpdates.push({
+                                    date: item.pubDate ? new Date(item.pubDate).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
+                                    headline: item.title,
+                                    source: feed.name,
+                                    url,
+                                });
+                                updatesFound++;
+                            }
+                        }
+                    }
+                }
+
+                writeJSON(KEEP_FILE, keep);
+                keepCache = keep;
+                broadcastSSE({ stage: 'complete', updatesFound });
+                console.log(`[keep-update] Complete: ${updatesFound} updates found`);
+            } catch (err) {
+                console.error('[keep-update] Error:', err.message);
+                broadcastSSE({ stage: 'error', message: err.message });
+            }
+        })();
+        return;
+    }
+
     // Route: static assets (scripts, styles, etc.)
     if (req.method === 'GET') {
         const staticPath = path.join(__dirname, url);
