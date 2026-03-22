@@ -836,9 +836,14 @@ const server = http.createServer(async (req, res) => {
             const totalSBs     = filtered.filter(d => d.type === 'SB').length;
             const emergencyADs = filtered.filter(d => d.urgency === 'emergency').length;
 
+            // Helper: format local Date as YYYY-MM or YYYY-MM-DD (avoids UTC shift from toISOString)
+            const pad = n => String(n).padStart(2, '0');
+            const fmtMonth = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
+            const fmtDate  = d => `${fmtMonth(d)}-${pad(d.getDate())}`;
+
             // New this month
             const now        = new Date();
-            const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+            const monthStart = fmtDate(new Date(now.getFullYear(), now.getMonth(), 1));
             const newADsThisMonth       = filtered.filter(d => d.type === 'AD'          && d.publishDate >= monthStart).length;
             const newEmergencyThisMonth = filtered.filter(d => d.urgency === 'emergency' && d.publishDate >= monthStart).length;
 
@@ -867,8 +872,8 @@ const server = http.createServer(async (req, res) => {
             const trend = [];
             for (let i = 11; i >= 0; i--) {
                 const d         = new Date(now.getFullYear(), now.getMonth() - i, 1);
-                const monthStr  = d.toISOString().slice(0, 7); // "YYYY-MM"
-                const nextMonth = new Date(d.getFullYear(), d.getMonth() + 1, 1).toISOString().slice(0, 7);
+                const monthStr  = fmtMonth(d);
+                const nextMonth = fmtMonth(new Date(d.getFullYear(), d.getMonth() + 1, 1));
                 const monthDirectives = filtered.filter(dir => dir.publishDate >= monthStr && dir.publishDate < nextMonth);
                 trend.push({
                     month:   monthStr,
