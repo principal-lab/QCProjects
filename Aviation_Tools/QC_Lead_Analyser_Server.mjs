@@ -149,6 +149,185 @@ function getArchive() {
     return archiveCache;
 }
 
+// ===== RSS FEED SOURCES =====
+const RSS_FEEDS = [
+    { name: 'AeroTime', url: 'https://www.aerotime.aero/rss' },
+    { name: 'Aviation Week', url: 'https://aviationweek.com/rss/air-transport' },
+    { name: 'FlightGlobal', url: 'https://www.flightglobal.com/rss' },
+    { name: 'ch-aviation', url: 'https://www.ch-aviation.com/portal/news/rss' },
+    { name: 'Simple Flying', url: 'https://simpleflying.com/feed/' },
+    { name: 'Aviation Business ME', url: 'https://www.aviationbusinessme.com/feed/' },
+    { name: 'Australian Aviation', url: 'https://australianaviation.com.au/feed/' },
+    { name: 'Airways Magazine', url: 'https://www.airwaysmag.com/feed/' },
+    { name: 'CASA Media', url: 'https://www.casa.gov.au/news-and-media/rss.xml' },
+    { name: 'EASA News', url: 'https://www.easa.europa.eu/en/newsroom/rss' },
+];
+
+const TENDER_URL = 'https://www.tendersontime.com/searchrfp/global-aviation-consultancy-rfp-733/';
+
+// ===== RSS/ATOM XML PARSER =====
+function parseRSSItems(xml) {
+    const items = [];
+    const rssItems = xml.match(/<item[^>]*>([\s\S]*?)<\/item>/gi) || [];
+    for (const raw of rssItems) {
+        const title = extractTag(raw, 'title');
+        const link = extractTag(raw, 'link') || extractAttr(raw, 'link', 'href');
+        const description = extractTag(raw, 'description');
+        const pubDate = extractTag(raw, 'pubDate') || extractTag(raw, 'dc:date');
+        if (title) {
+            items.push({ title: stripCDATA(title), link: stripCDATA(link || ''), description: stripCDATA(description || ''), pubDate });
+        }
+    }
+    if (items.length === 0) {
+        const atomEntries = xml.match(/<entry[^>]*>([\s\S]*?)<\/entry>/gi) || [];
+        for (const raw of atomEntries) {
+            const title = extractTag(raw, 'title');
+            const link = extractAttr(raw, 'link', 'href');
+            const summary = extractTag(raw, 'summary') || extractTag(raw, 'content');
+            const updated = extractTag(raw, 'updated') || extractTag(raw, 'published');
+            if (title) {
+                items.push({ title: stripCDATA(title), link: link || '', description: stripCDATA(summary || ''), pubDate: updated });
+            }
+        }
+    }
+    return items;
+}
+
+function extractTag(xml, tag) {
+    const re = new RegExp('<' + tag + '[^>]*>([\\s\\S]*?)</' + tag + '>', 'i');
+    const m = xml.match(re);
+    return m ? m[1].trim() : null;
+}
+
+function extractAttr(xml, tag, attr) {
+    const re = new RegExp('<' + tag + '[^>]*' + attr + '=["\']([^"\']*)["\']', 'i');
+    const m = xml.match(re);
+    return m ? m[1] : null;
+}
+
+function stripCDATA(text) {
+    return text.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1').replace(/<[^>]+>/g, '').trim();
+}
+
+// ===== SEVEN-REGION KEYWORD MAP =====
+const REGION_MAP = {
+    australia: ['australia', 'australian', 'sydney', 'melbourne', 'brisbane', 'perth',
+        'adelaide', 'darwin', 'hobart', 'canberra', 'casa', 'qantas',
+        'gold coast', 'cairns', 'virgin australia', 'jetstar', 'rex airlines', 'bonza'],
+    oceania: ['new zealand', 'auckland', 'wellington', 'christchurch', 'fiji', 'suva', 'nadi',
+        'papua new guinea', 'port moresby', 'vanuatu', 'samoa', 'tonga',
+        'french polynesia', 'tahiti', 'new caledonia', 'solomon islands',
+        'micronesia', 'guam', 'palau', 'cook islands', 'kiribati', 'air niugini'],
+    se_asia: ['thailand', 'thai', 'bangkok', 'suvarnabhumi', 'don mueang', 'caat',
+        'vietnam', 'vietnamese', 'hanoi', 'ho chi minh',
+        'indonesia', 'indonesian', 'jakarta', 'garuda', 'lion air',
+        'philippines', 'filipino', 'manila', 'cebu',
+        'malaysia', 'malaysian', 'kuala lumpur', 'caam',
+        'singapore', 'singaporean', 'changi', 'caas',
+        'cambodia', 'phnom penh', 'myanmar', 'yangon', 'laos', 'vientiane', 'brunei'],
+    east_asia: ['china', 'chinese', 'beijing', 'shanghai', 'guangzhou', 'shenzhen', 'caac',
+        'japan', 'japanese', 'tokyo', 'osaka', 'narita', 'haneda',
+        'south korea', 'korean', 'seoul', 'incheon',
+        'taiwan', 'taipei', 'taoyuan',
+        'hong kong', 'cathay', 'macau',
+        'mongolia', 'ulaanbaatar'],
+    central_asia: ['kazakhstan', 'kazakh', 'astana', 'almaty', 'air astana',
+        'uzbekistan', 'uzbek', 'tashkent', 'uzbekistan airways',
+        'turkmenistan', 'ashgabat', 'turkmenistan airlines',
+        'tajikistan', 'dushanbe', 'somon air',
+        'kyrgyzstan', 'bishkek', 'ala archa'],
+    middle_east: ['saudi arabia', 'saudi', 'riyadh', 'jeddah', 'neom', 'gaca', 'saudia',
+        'uae', 'emirates', 'dubai', 'abu dhabi', 'etihad', 'flydubai',
+        'qatar', 'doha', 'qatar airways',
+        'bahrain', 'gulf air', 'oman', 'muscat', 'salalah', 'oman air',
+        'kuwait', 'jordan', 'amman', 'royal jordanian',
+        'iraq', 'baghdad', 'iraqi airways',
+        'israel', 'tel aviv', 'el al', 'iran', 'tehran', 'mahan air',
+        'lebanon', 'beirut', 'middle east airlines'],
+    europe: ['europe', 'european', 'easa',
+        'united kingdom', 'uk ', 'british', 'london', 'heathrow', 'gatwick',
+        'germany', 'german', 'lufthansa', 'frankfurt', 'munich', 'berlin',
+        'france', 'french', 'paris', 'air france',
+        'spain', 'spanish', 'madrid', 'barcelona', 'iberia',
+        'italy', 'italian', 'rome', 'milan', 'ita airways',
+        'netherlands', 'dutch', 'amsterdam', 'klm',
+        'poland', 'warsaw', 'lot polish',
+        'norway', 'norwegian', 'oslo', 'sweden', 'stockholm', 'sas',
+        'denmark', 'copenhagen', 'finland', 'helsinki', 'finnair',
+        'ireland', 'dublin', 'ryanair', 'aer lingus',
+        'portugal', 'lisbon', 'tap', 'greece', 'athens', 'aegean',
+        'switzerland', 'swiss', 'zurich', 'austria', 'vienna',
+        'iceland', 'reykjavik', 'malta', 'romania', 'bucharest',
+        'hungary', 'budapest', 'wizz air', 'croatia', 'czech', 'prague',
+        'bulgaria', 'sofia', 'estonia', 'tallinn'],
+};
+
+// ===== CLASSIFY ARTICLE BY REGION =====
+function classifyRegion(title, description) {
+    const text = (title + ' ' + description).toLowerCase();
+    for (const [region, keywords] of Object.entries(REGION_MAP)) {
+        for (const kw of keywords) {
+            if (text.includes(kw.toLowerCase())) {
+                return region;
+            }
+        }
+    }
+    return null;
+}
+
+// ===== SERVICE LINE KEYWORDS =====
+const SERVICE_KEYWORDS = {
+    'Airline Startup': ['new airline', 'startup airline', 'airline launch', 'aoc granted',
+        'air operator certificate', 'inaugural flight', 'commences operations',
+        'begins operations', 'maiden flight', 'new carrier', 'airline approved',
+        'aoc application', 'aoc received'],
+    'Aircraft Entry Into Service': ['new aircraft', 'fleet renewal', 'aircraft delivery',
+        'entry into service', 'first delivery', 'aircraft order', 'new fleet',
+        'aircraft induction'],
+    'Sourcing Aircraft': ['aircraft acquisition', 'aircraft purchase', 'business jet order',
+        'fleet expansion', 'aircraft lease', 'aircraft deal', 'jet order',
+        'aircraft procurement'],
+    'Flight Training': ['flight training', 'pilot training', 'cadet programme',
+        'flight school', 'type rating', 'training centre', 'training center',
+        'pilot academy', 'training contract'],
+    'Ops Management': ['flight operations', 'operations management', 'operational efficiency',
+        'coo appointed', 'ops director', 'operations director',
+        'flight operations manager'],
+    'Simulators': ['simulator', 'flight simulation', 'full flight simulator', 'ffs',
+        'fstd', 'simulator acquisition', 'sim centre', 'sim center',
+        'simulator contract', 'training device'],
+    'Route Analysis': ['new route', 'route launch', 'route expansion', 'network expansion',
+        'new destination', 'route application', 'route announcement',
+        'new service', 'new flights'],
+    'Ops Technology': ['flight ops technology', 'efb', 'electronic flight bag',
+        'ops system', 'flight planning system', 'crew management system',
+        'operations technology', 'digital ops'],
+    'Auditing': ['audit', 'iosa', 'safety review', 'regulatory action', 'compliance review',
+        'regulatory intervention', 'sanctions', 'restrictions', 'grounded',
+        'safety audit', 'compliance audit', 'regulatory review',
+        'enforcement action', 'safety inspection'],
+    'Ops Manual': ['operations manual', 'flight operations manual', 'sop',
+        'standard operating procedures', 'manual amendment', 'ops manual',
+        'manual review', 'fcom', 'operations specification'],
+};
+
+function matchServiceLines(title, description) {
+    const text = (title + ' ' + description).toLowerCase();
+    const hits = {};
+    for (const [service, keywords] of Object.entries(SERVICE_KEYWORDS)) {
+        let count = 0;
+        for (const kw of keywords) {
+            if (text.includes(kw.toLowerCase())) count++;
+        }
+        if (count > 0) hits[service] = count;
+    }
+    return hits;
+}
+
+function isRelevant(title, description) {
+    return Object.keys(matchServiceLines(title, description)).length > 0;
+}
+
 // ===== HTTP SERVER =====
 const server = http.createServer(async (req, res) => {
     // CORS preflight
