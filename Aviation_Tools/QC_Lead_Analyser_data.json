@@ -1,5 +1,51 @@
 {
-  "leads": [],
-  "lastScanDate": null,
-  "scanStats": { "totalScanned": 0, "matchedLeads": 0 }
+  "leads": [
+    {
+      "id": "lead_aq1mdt",
+      "entity": "South Korea&#8217;s cost-cutting measures led",
+      "headline": "South Korea&#8217;s cost-cutting measures led to tragic Jeju Air crash, audit reveals",
+      "description": "South Korea&#8217;s Ministry of Land, Infrastructure and Transport has cut construction costs and approved improper airport safety structures&#8230;\nThe post South Korea’s cost-cutting measures led to tragic Jeju Air crash, audit reveals appeared first on AeroTime.",
+      "sourceUrl": "https://www.aerotime.aero/articles/south-koreas-cost-cutting-measures-led-to-tragic-jeju-air-crash-audit-reveals",
+      "source": "AeroTime",
+      "publishDate": "2026-03-11",
+      "fetchDate": "2026-03-22T22:16:55.183Z",
+      "region": "east_asia",
+      "grade": "YELLOW",
+      "gradeLabel": "Possible Fit",
+      "reasoning": "Possible fit for Auditing. Further assessment recommended to confirm consulting opportunity.",
+      "matchedServices": [
+        "Auditing"
+      ],
+      "assessmentSource": "rule-based",
+      "keywordHits": {
+        "Auditing": 1
+      }
+    },
+    {
+      "id": "lead_fk5zt7",
+      "entity": "South Korea’s first Embraer C-390",
+      "headline": "South Korea’s first Embraer C-390 completes maiden flight",
+      "description": "The first Embraer C-390 Millennium built for the Republic of Korea Air Force (ROKAF) has completed its maiden&#8230;\nThe post South Korea’s first Embraer C-390 completes maiden flight   appeared first on AeroTime.",
+      "sourceUrl": "https://www.aerotime.aero/articles/south-korea-first-embraer-c390-maiden-flight",
+      "source": "AeroTime",
+      "publishDate": "2026-03-19",
+      "fetchDate": "2026-03-22T23:44:18.591Z",
+      "region": "east_asia",
+      "grade": "YELLOW",
+      "gradeLabel": "Possible Fit",
+      "reasoning": "Possible fit for Airline Startup. Further assessment recommended to confirm consulting opportunity.",
+      "matchedServices": [
+        "Airline Startup"
+      ],
+      "assessmentSource": "rule-based",
+      "keywordHits": {
+        "Airline Startup": 1
+      }
+    }
+  ],
+  "lastScanDate": "2026-03-22T23:44:20.951Z",
+  "scanStats": {
+    "totalScanned": 123,
+    "matchedLeads": 3
+  }
 }

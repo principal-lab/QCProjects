@@ -1,3 +1,40 @@
 {
-  "leads": []
+  "leads": [
+    {
+      "id": "lead_lglg7j",
+      "entity": "Boeing hopes for major China",
+      "headline": "Boeing hopes for major China order as Trump-Xi summit nears",
+      "description": "Boeing could be nearing its first major Chinese aircraft order in nearly a decade, with Bloomberg reporting that China is&#8230;\nThe post Boeing hopes for major China order as Trump-Xi summit nears appeared first on AeroTime.",
+      "sourceUrl": "https://www.aerotime.aero/articles/boeing-china-737-max-order-trump-trip",
+      "source": "AeroTime",
+      "publishDate": "2026-03-13",
+      "fetchDate": "2026-03-22T22:16:55.177Z",
+      "region": "east_asia",
+      "grade": "YELLOW",
+      "gradeLabel": "Possible Fit",
+      "reasoning": "Possible fit for Aircraft Entry Into Service. Further assessment recommended to confirm consulting opportunity.",
+      "matchedServices": [
+        "Aircraft Entry Into Service"
+      ],
+      "assessmentSource": "rule-based",
+      "keywordHits": {
+        "Aircraft Entry Into Service": 1
+      },
+      "keptDate": "2026-03-22T23:09:05.640Z",
+      "website": "",
+      "contactName": "",
+      "contactEmail": "",
+      "contactPhone": "",
+      "linkedin": "",
+      "notes": "verification test note",
+      "recentUpdates": [
+        {
+          "date": "2026-03-13",
+          "headline": "Boeing hopes for major China order as Trump-Xi summit nears",
+          "source": "AeroTime",
+          "url": "https://www.aerotime.aero/articles/boeing-china-737-max-order-trump-trip"
+        }
+      ]
+    }
+  ]
 }
