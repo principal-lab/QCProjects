@@ -328,6 +328,218 @@ function isRelevant(title, description) {
     return Object.keys(matchServiceLines(title, description)).length > 0;
 }
 
+// ===== ENTITY NAME EXTRACTION =====
+function extractEntityName(title) {
+    const patterns = [
+        /^([A-Z][A-Za-z\s]+(?:Air(?:lines?|ways)?|Aviation|Aerospace))/,
+        /^([A-Z][A-Za-z\s]{2,30})\s+(?:launch|receiv|secur|commence|begin|start|plan|announc|get|gain|grant|order|sign|acquir)/i,
+        /new (?:airline|carrier)\s+([A-Z][A-Za-z\s]+?)(?:\s+(?:launch|to|plan|set|receiv))/i,
+    ];
+    for (const re of patterns) {
+        const m = title.match(re);
+        if (m) return m[1].trim();
+    }
+    return title.split(/\s+/).slice(0, 5).join(' ');
+}
+
+// ===== RULE-BASED GRADING =====
+function gradeLead(keywordHits) {
+    const serviceCount = Object.keys(keywordHits).length;
+    const totalHits = Object.values(keywordHits).reduce((a, b) => a + b, 0);
+    const criticalServices = ['Airline Startup', 'Simulators', 'Auditing'];
+    const hasCriticalStrong = criticalServices.some(s => (keywordHits[s] || 0) >= 2);
+
+    if (serviceCount >= 3 || (serviceCount >= 1 && hasCriticalStrong && totalHits >= 3)) {
+        return { grade: 'GREEN', gradeLabel: 'Good Fit' };
+    }
+    if (serviceCount >= 1) {
+        return { grade: 'YELLOW', gradeLabel: 'Possible Fit' };
+    }
+    return { grade: 'AMBER', gradeLabel: 'Poor Fit' };
+}
+
+// ===== REASONING GENERATOR =====
+function generateReasoning(entity, keywordHits, grade) {
+    const services = Object.keys(keywordHits);
+    if (services.length === 0) {
+        return `Tangential match for ${entity}. Limited direct consulting opportunity identified.`;
+    }
+    const serviceList = services.join(', ');
+    if (grade === 'GREEN') {
+        return `Strong fit across ${services.length} service lines: ${serviceList}. Multiple consulting opportunities identified.`;
+    }
+    if (grade === 'YELLOW') {
+        return `Possible fit for ${serviceList}. Further assessment recommended to confirm consulting opportunity.`;
+    }
+    return `Weak match for ${serviceList}. Limited or tangential consulting opportunity.`;
+}
+
+// ===== TENDERS HTML PARSER =====
+function parseTenderItems(html) {
+    const items = [];
+    const titlePattern = /<a[^>]+href="([^"]*)"[^>]*>([^<]*(?:aviation|airline|flight|airport|pilot|training|simulator|consulting)[^<]*)<\/a>/gi;
+    let match;
+    while ((match = titlePattern.exec(html)) !== null) {
+        const link = match[1].startsWith('http') ? match[1] : 'https://www.tendersontime.com' + match[1];
+        items.push({
+            title: match[2].trim(),
+            link,
+            description: match[2].trim(),
+            pubDate: new Date().toISOString(),
+        });
+    }
+    if (items.length === 0) {
+        const listPattern = /<h[2-4][^>]*>([^<]*(?:aviation|airline|flight|airport|pilot|training|simulator|consulting)[^<]*)<\/h[2-4]>/gi;
+        while ((match = listPattern.exec(html)) !== null) {
+            items.push({
+                title: match[1].trim(),
+                link: 'https://www.tendersontime.com/searchrfp/global-aviation-consultancy-rfp-733/',
+                description: match[1].trim(),
+                pubDate: new Date().toISOString(),
+            });
+        }
+    }
+    return items;
+}
+
+// ===== DEDUPLICATION =====
+function isDuplicate(leadId, title, allStores) {
+    const normTitle = title.toLowerCase().trim().substring(0, 40);
+    for (const store of allStores) {
+        for (const lead of (store.leads || [])) {
+            if (lead.id === leadId) return true;
+            if (normTitle.length > 20 && lead.headline &&
+                lead.headline.toLowerCase().trim().substring(0, 40) === normTitle) return true;
+        }
+    }
+    return false;
+}
+
+// ===== SCAN ORCHESTRATOR =====
+let scanCache = { timestamp: 0, regionKey: '', results: null };
+const SCAN_CACHE_MS = 10 * 60 * 1000;
+
+async function runScan(requestedRegions) {
+    const regionKey = requestedRegions.slice().sort().join(',');
+    if (Date.now() - scanCache.timestamp < SCAN_CACHE_MS && scanCache.regionKey === regionKey && scanCache.results) {
+        broadcastSSE({ stage: 'complete', cached: true, ...scanCache.results });
+        return scanCache.results;
+    }
+
+    const data = readJSON(DATA_FILE);
+    const keep = readJSON(KEEP_FILE);
+    const archive = readJSON(ARCHIVE_FILE);
+    const allStores = [data, keep, archive];
+    const failedSources = [];
+    let totalScanned = 0;
+    const newLeads = [];
+
+    const total = RSS_FEEDS.length + 1;
+    let completed = 0;
+
+    const feedPromises = RSS_FEEDS.map(feed =>
+        httpsGet(feed.url, 15000)
+            .then(xml => ({ feed, xml, error: null }))
+            .catch(err => ({ feed, xml: null, error: err }))
+    );
+
+    const feedResults = await Promise.all(feedPromises);
+
+    for (const { feed, xml, error } of feedResults) {
+        completed++;
+        broadcastSSE({ stage: 'fetching', source: feed.name, progress: completed / total });
+
+        if (error) {
+            console.error(`[scan] ${feed.name} failed:`, error.message);
+            failedSources.push(feed.name);
+            continue;
+        }
+
+        const items = parseRSSItems(xml);
+        totalScanned += items.length;
+
+        for (const item of items) {
+            const region = classifyRegion(item.title, item.description);
+            if (!region || !requestedRegions.includes(region)) continue;
+            if (!isRelevant(item.title, item.description)) continue;
+
+            const id = 'lead_' + hashString((item.link || '') + item.title);
+            if (isDuplicate(id, item.title, allStores)) continue;
+
+            const entity = extractEntityName(item.title);
+            const keywordHits = matchServiceLines(item.title, item.description);
+            const { grade, gradeLabel } = gradeLead(keywordHits);
+            const reasoning = generateReasoning(entity, keywordHits, grade);
+
+            newLeads.push({
+                id, entity,
+                headline: item.title,
+                description: stripCDATA(item.description || '').substring(0, 500),
+                sourceUrl: item.link || '',
+                source: feed.name,
+                publishDate: item.pubDate ? new Date(item.pubDate).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
+                fetchDate: new Date().toISOString(),
+                region, grade, gradeLabel, reasoning,
+                matchedServices: Object.keys(keywordHits),
+                assessmentSource: 'rule-based',
+                keywordHits,
+            });
+        }
+    }
+
+    // Fetch TendersOnTime
+    broadcastSSE({ stage: 'fetching', source: 'TendersOnTime', progress: completed / total });
+    try {
+        const html = await httpsGet(TENDER_URL, 15000);
+        const tenderItems = parseTenderItems(html);
+        totalScanned += tenderItems.length;
+
+        for (const item of tenderItems) {
+            const region = classifyRegion(item.title, item.description);
+            if (!region || !requestedRegions.includes(region)) continue;
+
+            const id = 'lead_' + hashString((item.link || '') + item.title);
+            if (isDuplicate(id, item.title, allStores)) continue;
+
+            const entity = extractEntityName(item.title);
+            const keywordHits = matchServiceLines(item.title, item.description);
+            const { grade, gradeLabel } = gradeLead(keywordHits);
+            const reasoning = generateReasoning(entity, keywordHits, grade);
+
+            newLeads.push({
+                id, entity,
+                headline: item.title,
+                description: item.description.substring(0, 500),
+                sourceUrl: item.link,
+                source: 'TendersOnTime',
+                publishDate: new Date().toISOString().slice(0, 10),
+                fetchDate: new Date().toISOString(),
+                region, grade, gradeLabel, reasoning,
+                matchedServices: Object.keys(keywordHits),
+                assessmentSource: 'rule-based',
+                keywordHits,
+            });
+        }
+    } catch (err) {
+        console.error('[scan] TendersOnTime failed:', err.message);
+        failedSources.push('TendersOnTime');
+    }
+    completed++;
+
+    data.leads.push(...newLeads);
+    data.lastScanDate = new Date().toISOString();
+    data.scanStats = { totalScanned, matchedLeads: data.leads.length };
+    writeJSON(DATA_FILE, data);
+    discoverCache = data;
+
+    const result = { newLeads: newLeads.length, totalLeads: data.leads.length, failedSources };
+    scanCache = { timestamp: Date.now(), regionKey, results: result };
+
+    broadcastSSE({ stage: 'complete', ...result });
+    console.log(`[scan] Complete: ${newLeads.length} new leads, ${data.leads.length} total`);
+    return result;
+}
+
 // ===== HTTP SERVER =====
 const server = http.createServer(async (req, res) => {
     // CORS preflight
@@ -401,6 +613,19 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && url === '/api/config') {
         res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
         res.end(JSON.stringify({ aiEnabled: !!process.env.ANTHROPIC_API_KEY }));
+        return;
+    }
+
+    // Route: POST /api/scan — trigger feed scan
+    if (req.method === 'POST' && url === '/api/scan') {
+        const body = await parseBody(req);
+        const regions = body.regions || Object.keys(REGION_MAP);
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+        res.end(JSON.stringify({ status: 'started' }));
+        runScan(regions).catch(err => {
+            console.error('[scan] Fatal:', err.message);
+            broadcastSSE({ stage: 'error', message: err.message });
+        });
         return;
     }
 
