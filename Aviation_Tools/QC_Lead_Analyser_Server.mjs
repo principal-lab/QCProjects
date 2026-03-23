@@ -975,6 +975,15 @@ Respond with JSON only:
     res.end('404 Not Found');
 });
 
+server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+        console.error(`Port ${PORT} is already in use. Stop the other process first or use a different port.`);
+    } else {
+        console.error('Server error:', err.message);
+    }
+    process.exit(1);
+});
+
 server.listen(PORT, () => {
     console.log(`QC Lead Analyser running on http://localhost:${PORT}`);
 });
