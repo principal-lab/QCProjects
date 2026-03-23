@@ -350,6 +350,18 @@
             color: var(--text-secondary);
         }
 
+        .source-link {
+            color: var(--accent-gold);
+            text-decoration: none;
+            font-weight: 600;
+            transition: color 0.2s;
+        }
+
+        .source-link:hover {
+            color: #e8c060;
+            text-decoration: underline;
+        }
+
         /* KEEP CARD EDITABLE FIELDS */
         .keep-fields {
             border-top: 1px solid #1a2332;
@@ -842,6 +854,7 @@ function renderLeadCard(l, tab) {
         <div class="service-tags">${services}</div>
         <div class="card-meta">
             <span>${escHtml(l.source || '')}</span>
+            ${l.sourceUrl ? `<a href="${escAttr(l.sourceUrl)}" target="_blank" rel="noopener" class="source-link">View Article &#8599;</a>` : ''}
             <span>${formatDate(l.publishDate)}</span>
         </div>
     </div>`;
@@ -930,6 +943,7 @@ function renderKeepCard(l) {
         ${updatesHtml}
         <div class="card-meta">
             <span>Kept: ${formatDate(l.keptDate)}</span>
+            ${l.sourceUrl ? `<a href="${escAttr(l.sourceUrl)}" target="_blank" rel="noopener" class="source-link">View Article &#8599;</a>` : ''}
             <span>${escHtml(l.source || '')} &mdash; ${formatDate(l.publishDate)}</span>
         </div>
     </div>`;
@@ -961,6 +975,7 @@ function renderArchiveTab(container) {
             <div class="card-headline">${escHtml(l.headline)}</div>
             <div class="card-meta">
                 <span>Archived: ${formatDate(l.archiveDate)}</span>
+                ${l.sourceUrl ? `<a href="${escAttr(l.sourceUrl)}" target="_blank" rel="noopener" class="source-link">View Article &#8599;</a>` : ''}
                 <span>${escHtml(l.source || '')}</span>
             </div>
             ${l.archiveNotes ? `<div class="card-description" style="margin-top:6px;font-style:italic;">Notes: ${escHtml(l.archiveNotes)}</div>` : ''}
@@ -1002,12 +1017,12 @@ function showContextMenu(e, leadId, tab) {
             <div class="ctx-item" onclick="doKeep()">&#10003; Keep</div>
             <div class="ctx-item" onclick="doArchivePrompt()">&#128230; Archive</div>
             <div class="ctx-divider"></div>
-            <div class="ctx-item ${window.ANTHROPIC_API_KEY ? '' : 'disabled'}" onclick="doAIAssess()">&#128269; AI Deep Assess</div>
+            <div class="ctx-item" onclick="doAIAssess()">&#128269; AI Deep Assess</div>
         `;
     } else if (tab === 'keep') {
         items = `
             <div class="ctx-item" onclick="doArchivePrompt()">&#128230; Archive</div>
-            <div class="ctx-item ${window.ANTHROPIC_API_KEY ? '' : 'disabled'}" onclick="doAIAssess()">&#128269; AI Deep Assess</div>
+            <div class="ctx-item" onclick="doAIAssess()">&#128269; AI Deep Assess</div>
             <div class="ctx-divider"></div>
             <div class="ctx-item" onclick="doOpenWebsite()">&#127760; Open Website</div>
         `;
@@ -1062,7 +1077,10 @@ async function doKeep() {
 
 async function doAIAssess() {
     hideContextMenu();
-    if (!window.ANTHROPIC_API_KEY) return;
+    if (!window.ANTHROPIC_API_KEY) {
+        showToast('ANTHROPIC_API_KEY not set — start the server with this environment variable to enable AI assessment');
+        return;
+    }
     showToast('AI assessment in progress...');
     const result = await api('POST', '/api/ai-assess', { leadId: contextTarget.leadId });
     if (result.success) {
