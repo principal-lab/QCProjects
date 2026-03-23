@@ -551,7 +551,7 @@ const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
 function callClaudeAPI(systemPrompt, userPrompt) {
     return new Promise((resolve, reject) => {
         const body = JSON.stringify({
-            model: 'claude-sonnet-4-6-20250320',
+            model: 'claude-sonnet-4-5-20250414',
             max_tokens: 500,
             system: systemPrompt,
             messages: [{ role: 'user', content: userPrompt }],
