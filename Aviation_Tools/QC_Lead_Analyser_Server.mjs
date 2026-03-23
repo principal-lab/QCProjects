@@ -551,7 +551,7 @@ const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
 function callClaudeAPI(systemPrompt, userPrompt) {
     return new Promise((resolve, reject) => {
         const body = JSON.stringify({
-            model: 'claude-sonnet-4-20250514',
+            model: 'claude-sonnet-4-6-20250320',
             max_tokens: 500,
             system: systemPrompt,
             messages: [{ role: 'user', content: userPrompt }],
@@ -725,7 +725,9 @@ Respond with JSON only:
         const userPrompt = `Title: ${lead.headline}\nSource: ${lead.source}\nDate: ${lead.publishDate}\nDescription: ${lead.description}`;
 
         try {
-            const responseText = await callClaudeAPI(systemPrompt, userPrompt);
+            let responseText = await callClaudeAPI(systemPrompt, userPrompt);
+            // Strip markdown code fences if present
+            responseText = responseText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/,'').trim();
             const assessment = JSON.parse(responseText);
 
             lead.grade = assessment.grade;
